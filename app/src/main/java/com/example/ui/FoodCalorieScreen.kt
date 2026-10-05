@@ -1,23 +1,23 @@
 package com.example.ui
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,7 +46,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -60,13 +58,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restaurant
@@ -90,14 +86,11 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -132,6 +125,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
 import com.example.data.model.MealAnalysisResult
@@ -178,6 +172,37 @@ fun FoodCalorieScreen(
         }
     }
 
+    // Runtime Camera Permission Request Flow to prevent crashes
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            try {
+                cameraLauncher.launch(null)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Unable to launch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Camera permission is required to photograph your food", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val launchCameraSafely = {
+        val permissionCheck = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        )
+        if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+            try {
+                cameraLauncher.launch(null)
+            } catch (e: Exception) {
+                Toast.makeText(context, "Unable to launch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     // Feedback banner updates
     LaunchedEffect(uiState.feedbackBanner) {
         val banner = uiState.feedbackBanner
@@ -201,7 +226,7 @@ fun FoodCalorieScreen(
                         )
                     )
                 },
-                onOpenCamera = { cameraLauncher.launch(null) }
+                onOpenCamera = launchCameraSafely
             )
         },
         bottomBar = {
@@ -209,14 +234,22 @@ fun FoodCalorieScreen(
                 activeTab = uiState.activeNavTab,
                 onTabSelected = { tabIndex ->
                     viewModel.setActiveNavTab(tabIndex)
-                    if (tabIndex == 1) {
-                        // Scroll directly to insights
-                        coroutineScope.launch {
-                            listState.animateScrollToItem(1)
+                    when (tabIndex) {
+                        0 -> {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(0)
+                            }
+                        }
+                        1 -> {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(2)
+                            }
+                        }
+                        2 -> {
+                            viewModel.openAskAiSheet()
                         }
                     }
-                },
-                onAdjustMealClick = { viewModel.openAdjustMealSheet() }
+                }
             )
         }
     ) { innerPadding ->
@@ -282,8 +315,7 @@ fun FoodCalorieScreen(
                     item(key = "footer_actions") {
                         MealFooterActions(
                             onAdjustMealClick = { viewModel.openAdjustMealSheet() },
-                            onAskAiClick = { viewModel.openAskAiSheet() },
-                            onViewJsonClick = { viewModel.openJsonDialog() }
+                            onAskAiClick = { viewModel.openAskAiSheet() }
                         )
                     }
                 }
@@ -298,7 +330,7 @@ fun FoodCalorieScreen(
                             )
                         )
                     },
-                    onUseCamera = { cameraLauncher.launch(null) }
+                    onUseCamera = launchCameraSafely
                 )
             }
 
@@ -340,29 +372,20 @@ fun FoodCalorieScreen(
         }
     }
 
-    // Modal Bottom Sheet: Adjust Meal (Editing Surface)
+    // Modal Bottom Sheet: Adjust Meal (Single unified sheet with inline Add Food to prevent overlapping sheets)
     if (uiState.showAdjustMealSheet && uiState.activeMealResult != null) {
         AdjustMealBottomSheet(
             meal = uiState.activeMealResult!!,
+            inAddMode = uiState.adjustSheetInAddMode,
+            onSetAddMode = { viewModel.setAdjustSheetAddMode(it) },
             naturalLanguageCorrection = uiState.naturalLanguageCorrection,
             onNaturalLanguageChange = { viewModel.onNaturalLanguageCorrectionChanged(it) },
             onApplyNaturalLanguage = { viewModel.applyNaturalLanguageCorrection() },
             onUpdateWeight = { foodId, newWeight -> viewModel.updateFoodWeight(foodId, newWeight) },
             onRemoveFood = { foodId -> viewModel.removeFoodItem(foodId) },
-            onAddFoodClick = { viewModel.openAddFoodSheet() },
+            onAddFood = { name, grams -> viewModel.addFoodItem(name, grams) },
             onRecalculateDone = { viewModel.recalculateMeal() },
             onDismiss = { viewModel.closeAdjustMealSheet() }
-        )
-    }
-
-    // Modal Bottom Sheet: Add Food
-    if (uiState.showAddFoodSheet) {
-        AddFoodBottomSheet(
-            onAddFood = { name, grams ->
-                viewModel.addFoodItem(name, grams)
-                viewModel.closeAddFoodSheet()
-            },
-            onDismiss = { viewModel.closeAddFoodSheet() }
         )
     }
 
@@ -790,7 +813,7 @@ private fun CollapsibleMealHeader(
 
                     FilledTonalButton(
                         onClick = onAdjustClick,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                         modifier = Modifier.testTag("collapsed_adjust_button")
                     ) {
                         Icon(
@@ -799,7 +822,7 @@ private fun CollapsibleMealHeader(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Adjust", style = MaterialTheme.typography.labelMedium)
+                        Text(text = "Adjust Meal", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -975,7 +998,7 @@ private fun CompactFoodItemRow(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     // Macro row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1009,17 +1032,12 @@ private fun CompactFoodItemRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Portion reasoning: ${food.visualCues}",
+                        text = "Portion cues: ${food.visualCues}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Text(
-                        text = "Source: ${food.nutritionReference.source} (~${food.nutritionReference.caloriesPer100g.roundToInt()} kcal/100g)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1027,8 +1045,8 @@ private fun CompactFoodItemRow(
                     ) {
                         FilledTonalButton(
                             onClick = onAdjustPortion,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
@@ -1295,30 +1313,29 @@ private fun AiNutritionInsightsSection(
 @Composable
 private fun MealFooterActions(
     onAdjustMealClick: () -> Unit,
-    onAskAiClick: () -> Unit,
-    onViewJsonClick: () -> Unit
+    onAskAiClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Button(
             onClick = onAdjustMealClick,
             modifier = Modifier
                 .weight(1f)
-                .height(44.dp)
+                .height(46.dp)
                 .testTag("adjust_meal_action_button"),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
             ),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Edit,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text("Adjust Meal", fontWeight = FontWeight.SemiBold)
@@ -1328,14 +1345,14 @@ private fun MealFooterActions(
             onClick = onAskAiClick,
             modifier = Modifier
                 .weight(1f)
-                .height(44.dp)
+                .height(46.dp)
                 .testTag("ask_ai_action_button"),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.Chat,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text("Ask AI", fontWeight = FontWeight.SemiBold)
@@ -1350,8 +1367,7 @@ private fun MealFooterActions(
 @Composable
 private fun SmartNavigationBottomBar(
     activeTab: Int,
-    onTabSelected: (Int) -> Unit,
-    onAdjustMealClick: () -> Unit
+    onTabSelected: (Int) -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -1364,64 +1380,41 @@ private fun SmartNavigationBottomBar(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
         )
     ) {
+        // Full width segmented pill containing only the 3 primary tabs
+        // Eliminates line-wrapping ("Insight\ns") and cramped text on all screen sizes
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Segmented tab bar
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(24.dp)
-                    )
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                NavigationTabItem(
-                    title = "Meal",
-                    icon = Icons.Default.Restaurant,
-                    isSelected = activeTab == 0,
-                    onClick = { onTabSelected(0) },
-                    modifier = Modifier.weight(1f)
-                )
-                NavigationTabItem(
-                    title = "Insights",
-                    icon = Icons.Default.Lightbulb,
-                    isSelected = activeTab == 1,
-                    onClick = { onTabSelected(1) },
-                    modifier = Modifier.weight(1f)
-                )
-                NavigationTabItem(
-                    title = "Ask AI",
-                    icon = Icons.AutoMirrored.Filled.Chat,
-                    isSelected = activeTab == 2,
-                    onClick = { onTabSelected(2) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Quick Adjust Floating Action
-            FilledTonalButton(
-                onClick = onAdjustMealClick,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                modifier = Modifier.testTag("quick_adjust_fab")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Adjust meal portions",
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Edit", style = MaterialTheme.typography.labelMedium)
-            }
+            NavigationTabItem(
+                title = "Meal",
+                icon = Icons.Default.Restaurant,
+                isSelected = activeTab == 0,
+                onClick = { onTabSelected(0) },
+                modifier = Modifier.weight(1f)
+            )
+            NavigationTabItem(
+                title = "Insights",
+                icon = Icons.Default.Lightbulb,
+                isSelected = activeTab == 1,
+                onClick = { onTabSelected(1) },
+                modifier = Modifier.weight(1f)
+            )
+            NavigationTabItem(
+                title = "Ask AI",
+                icon = Icons.AutoMirrored.Filled.Chat,
+                isSelected = activeTab == 2,
+                onClick = { onTabSelected(2) },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -1435,22 +1428,22 @@ private fun NavigationTabItem(
     modifier: Modifier = Modifier
 ) {
     val backgroundColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         label = "tab_bg"
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         label = "tab_content"
     )
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         color = backgroundColor,
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -1458,33 +1451,37 @@ private fun NavigationTabItem(
                 imageVector = icon,
                 contentDescription = title,
                 tint = contentColor,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = contentColor
+                color = contentColor,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
 }
 
 // ==========================================
-// 7. ADJUST MEAL BOTTOM SHEET (EDITING SURFACE)
+// 7. ADJUST MEAL BOTTOM SHEET (UNIFIED SINGLE-SHEET FLOW)
 // ==========================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdjustMealBottomSheet(
     meal: MealAnalysisResult,
+    inAddMode: Boolean,
+    onSetAddMode: (Boolean) -> Unit,
     naturalLanguageCorrection: String,
     onNaturalLanguageChange: (String) -> Unit,
     onApplyNaturalLanguage: () -> Unit,
     onUpdateWeight: (String, Double) -> Unit,
     onRemoveFood: (String) -> Unit,
-    onAddFoodClick: () -> Unit,
+    onAddFood: (String, Double) -> Unit,
     onRecalculateDone: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1500,118 +1497,141 @@ private fun AdjustMealBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .navigationBarsPadding()
                 .padding(16.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "Adjust Meal",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+            AnimatedContent(
+                targetState = inAddMode,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "sheet_mode"
+            ) { isAddModeView ->
+                if (isAddModeView) {
+                    // INLINE ADD FOOD VIEW (Prevents stacked/overlapping sheets)
+                    InlineAddFoodContent(
+                        onBack = { onSetAddMode(false) },
+                        onFoodAdded = { name, grams ->
+                            onAddFood(name, grams)
+                        }
                     )
-                    Text(
-                        text = "Live Total: ${total.calories} kcal · ${total.protein}P · ${total.carbs}C · ${total.fat}F",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = ColorCalories,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
-                }
-            }
+                } else {
+                    // MAIN ADJUST MEAL VIEW
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Adjust Meal",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Live Total: ${total.calories} kcal · ${total.protein}P · ${total.carbs}C · ${total.fat}F",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = ColorCalories,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            IconButton(onClick = onDismiss) {
+                                Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                            }
+                        }
 
-            Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-            // Natural Language Quick Correction Bar
-            OutlinedTextField(
-                value = naturalLanguageCorrection,
-                onValueChange = onNaturalLanguageChange,
-                placeholder = { Text("e.g. 'Rice to 200g', 'Remove salad', 'Add 1 egg'") },
-                trailingIcon = {
-                    if (naturalLanguageCorrection.isNotBlank()) {
-                        IconButton(onClick = onApplyNaturalLanguage) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Apply correction",
-                                tint = MaterialTheme.colorScheme.primary
+                        // Natural Language Quick Correction Bar
+                        OutlinedTextField(
+                            value = naturalLanguageCorrection,
+                            onValueChange = onNaturalLanguageChange,
+                            placeholder = { Text("e.g. 'Rice to 200g', 'Remove salad', 'Add 1 egg'") },
+                            trailingIcon = {
+                                if (naturalLanguageCorrection.isNotBlank()) {
+                                    IconButton(onClick = onApplyNaturalLanguage) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = "Apply correction",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("natural_language_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Scrollable list of items to edit
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(meal.foods, key = { it.id }) { item ->
+                                MealItemEditRow(
+                                    item = item,
+                                    onWeightChanged = { newWeight -> onUpdateWeight(item.id, newWeight) },
+                                    onRemove = { onRemoveFood(item.id) }
+                                )
+                            }
+
+                            item {
+                                OutlinedButton(
+                                    onClick = { onSetAddMode(true) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .testTag("add_food_inside_adjust_sheet"),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Add, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Add Food / Side Dish")
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Recalculate & Done Button
+                        Button(
+                            onClick = onRecalculateDone,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("recalculate_button"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            Icon(imageVector = Icons.Default.Check, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Recalculate & Done",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("natural_language_input"),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Scrollable list of items to edit
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(meal.foods, key = { it.id }) { item ->
-                    MealItemEditRow(
-                        item = item,
-                        onWeightChanged = { newWeight -> onUpdateWeight(item.id, newWeight) },
-                        onRemove = { onRemoveFood(item.id) }
-                    )
                 }
-
-                item {
-                    OutlinedButton(
-                        onClick = onAddFoodClick,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp)
-                            .testTag("add_food_inside_adjust_sheet"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Add Food / Side Dish")
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Recalculate & Done Button
-            Button(
-                onClick = onRecalculateDone,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("recalculate_button"),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Icon(imageVector = Icons.Default.Check, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Recalculate & Done",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
     }
 }
 
+/**
+ * Meal item editing card with well-spaced stepper and horizontally scrollable quick chips.
+ * Fixes the clipped squished empty chip bug shown in screenshots 2 & 4.
+ */
 @Composable
 private fun MealItemEditRow(
     item: DetectedFoodItem,
@@ -1625,7 +1645,7 @@ private fun MealItemEditRow(
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             // Top: Name + Calories + Trash
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1635,13 +1655,15 @@ private fun MealItemEditRow(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.name,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${item.calories} kcal (${item.protein}P · ${item.carbs}C · ${item.fat}F)",
+                        text = "${item.calories} kcal · ${item.protein}P · ${item.carbs}C · ${item.fat}F",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = ColorCalories,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
@@ -1657,73 +1679,102 @@ private fun MealItemEditRow(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Portion Stepper: [-] 180 g [+]
+            // Stepper Row: prominent, centered with generous touch targets
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+                Text(
+                    text = "Portion:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FilledTonalButton(
                         onClick = { onWeightChanged((item.weightGrams - 25.0).coerceAtLeast(10.0)) },
                         shape = CircleShape,
                         contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease")
+                        Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease portion by 25g")
                     }
 
-                    Text(
-                        text = "${item.weightGrams.roundToInt()} g",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.widthIn(min = 60.dp),
-                        textAlign = TextAlign.Center
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.widthIn(min = 80.dp)
+                    ) {
+                        Text(
+                            text = "${item.weightGrams.roundToInt()} g",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
                     FilledTonalButton(
                         onClick = { onWeightChanged(item.weightGrams + 25.0) },
                         shape = CircleShape,
                         contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "Increase")
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "Increase portion by 25g")
                     }
                 }
+            }
 
-                // Quick preset tags (50g, 100g, 200g)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf(50, 100, 200).forEach { presetGrams ->
-                        FilterChip(
-                            selected = item.weightGrams.roundToInt() == presetGrams,
-                            onClick = { onWeightChanged(presetGrams.toDouble()) },
-                            label = { Text("${presetGrams}g", style = MaterialTheme.typography.labelSmall) }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Quick preset chips on their own dedicated scrollable row (eliminates squishing/clipping)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Quick:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                listOf(50, 100, 150, 200, 250).forEach { presetGrams ->
+                    val isSelected = item.weightGrams.roundToInt() == presetGrams
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { onWeightChanged(presetGrams.toDouble()) },
+                        label = { Text("${presetGrams}g") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )
-                    }
+                    )
                 }
             }
         }
     }
 }
 
-// ==========================================
-// 8. ADD FOOD BOTTOM SHEET
-// ==========================================
-
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Inline Add Food component rendered cleanly inside AdjustMealBottomSheet.
+ * Eliminates stacked/overlapping bottom sheets (screenshot 3).
+ */
 @Composable
-private fun AddFoodBottomSheet(
-    onAddFood: (String, Double) -> Unit,
-    onDismiss: () -> Unit
+private fun InlineAddFoodContent(
+    onBack: () -> Unit,
+    onFoodAdded: (String, Double) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var searchQuery by remember { mutableStateOf("") }
-    var selectedGrams by remember { mutableStateOf(100.0) }
 
     val verifiedFoods = remember {
         listOf(
@@ -1748,114 +1799,117 @@ private fun AddFoodBottomSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = null,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.75f)
-                .navigationBarsPadding()
-                .padding(16.dp)
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header with Back Button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to meal items"
+                    )
+                }
                 Text(
                     text = "Add Food to Meal",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
-                IconButton(onClick = onDismiss) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
-                }
             }
+            IconButton(onClick = onBack) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+            }
+        }
 
-            Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search food or side dish...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("add_food_search_input"),
-                shape = RoundedCornerShape(12.dp)
-            )
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search food or side dish...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("add_food_search_input"),
+            shape = RoundedCornerShape(12.dp)
+        )
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Text(
-                text = "Verified Nutrition Database Options",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        Text(
+            text = "Verified Nutrition Database Options",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filteredList) { (foodName, defaultGrams) ->
-                    val resolved = NutritionDatabase.resolveNutrition(foodName)
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onAddFood(foodName, defaultGrams)
-                            }
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(filteredList) { (foodName, defaultGrams) ->
+                val resolved = NutritionDatabase.resolveNutrition(foodName)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onFoodAdded(foodName, defaultGrams) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = foodName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Serving: ${defaultGrams.roundToInt()}g · ~${((defaultGrams / 100.0) * resolved.caloriesPer100g).roundToInt()} kcal",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = { onFoodAdded(foodName, defaultGrams) },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = foodName,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Serving: ${defaultGrams.roundToInt()}g · ~${((defaultGrams / 100.0) * resolved.caloriesPer100g).roundToInt()} kcal",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            FilledTonalButton(
-                                onClick = { onAddFood(foodName, defaultGrams) },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                            ) {
-                                Text("+ Add")
-                            }
+                            Text("+ Add")
                         }
                     }
                 }
+            }
 
-                // If user entered a custom food not in list
-                if (searchQuery.isNotBlank() && filteredList.none { it.first.equals(searchQuery, ignoreCase = true) }) {
-                    item {
-                        Button(
-                            onClick = { onAddFood(searchQuery.trim(), 100.0) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Text("Add \"${searchQuery.trim()}\" (100g)")
-                        }
+            if (searchQuery.isNotBlank() && filteredList.none { it.first.equals(searchQuery, ignoreCase = true) }) {
+                item {
+                    Button(
+                        onClick = { onFoodAdded(searchQuery.trim(), 100.0) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text("Add \"${searchQuery.trim()}\" (100g)")
                     }
                 }
             }
@@ -1864,7 +1918,7 @@ private fun AddFoodBottomSheet(
 }
 
 // ==========================================
-// 9. ASK AI ABOUT THIS MEAL BOTTOM SHEET
+// 8. ASK AI ABOUT THIS MEAL BOTTOM SHEET
 // ==========================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2071,7 +2125,7 @@ private fun ChatBubble(message: ChatMessage) {
 }
 
 // ==========================================
-// 10. DEVELOPER DETAILS DIALOGS (RAW JSON & DB)
+// 9. DEVELOPER DETAILS DIALOGS (RAW JSON & DB)
 // ==========================================
 
 @Composable
@@ -2198,7 +2252,7 @@ private fun NutritionDatabaseDialog(
 }
 
 // ==========================================
-// 11. API KEY SETTINGS DIALOG
+// 10. API KEY SETTINGS DIALOG
 // ==========================================
 
 @Composable
@@ -2313,7 +2367,7 @@ private fun ApiKeySettingsDialog(
 }
 
 // ==========================================
-// 12. EMPTY OR INITIAL STATE VIEW
+// 11. EMPTY OR INITIAL STATE VIEW
 // ==========================================
 
 @Composable

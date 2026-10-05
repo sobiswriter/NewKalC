@@ -109,18 +109,20 @@ Adhere strictly to an **8.dp base grid** (with occasional 4.dp micro-increments)
 
 ### 5.3 Adjust Meal Bottom Sheet (Contained Editing Surface)
 - Rather than cluttering the main screen with numerous numeric steppers and sliders, meal editing is contained in a sleek Modal Bottom Sheet.
+- **Single-Sheet Navigation Rule:** Never stack multiple `ModalBottomSheet`s on top of each other. When adding food from within the Adjust Meal sheet, transition the internal sheet content inline with a top Back Arrow navigation affordance (`< Add Food to Meal`) rather than opening a second overlapping sheet.
+- **Portion Controls Layout Rule:**
+  - Stepper `[-] 250 g [+]` must occupy its own dedicated horizontal row with at least 40.dp buttons and a clear centered grams badge.
+  - Quick portion preset chips (`50g`, `100g`, `150g`, `200g`, etc.) must be placed on a separate horizontal scrollable row (`horizontalScroll`) to prevent horizontal constraint squishing and clipped text on small mobile screens.
+  - Direct item removal via a prominent trash icon on the top right of each item card.
 - **Components within Sheet:**
-  - Header with live-updating total preview (`Meal: 520 kcal · 24P 70C 18F`).
-  - List of current items, each equipped with:
-    - Item name and current portion.
-    - Quick stepper `[-]` and `[+]` (stepping by 25g or 1 serving).
-    - Slider or direct numeric text field for precise gram entry.
-    - Single-tap trash icon to remove with undo snackbar.
-  - **"+ Add Food"** action button opening an inline search / selection sheet.
-  - Primary button: **"Done & Recalculate"** (smoothly closes sheet and updates all dependent state).
+  - Header with live-updating total preview (`Live Total: 520 kcal · 24P · 70C · 18F`).
+  - List of current items with portion steppers, quick chips, and remove affordance.
+  - **"+ Add Food / Side Dish"** action button opening the inline search view.
+  - Primary button: **"Recalculate & Done"** (smoothly closes sheet and updates all dependent state).
 
 ### 5.4 Add Food Flow
-- Compact search-first dialog or nested bottom sheet.
+- Compact search-first interface seamlessly integrated inline within the Adjust Meal sheet (or accessible directly from the main meal header).
+- Displays a prominent Back button (`<`) when opened from inside Adjust Meal so users can return to the active meal items list at any time.
 - Instant search filtering over verified Nutrition Database entries (e.g., *Raita, Boiled Egg, Roti, Salad*).
 - Default serving selection (e.g. `100 g`, `1 piece (50g)`).
 - Instant inclusion into the active meal with deterministic nutrition calculation.
@@ -158,10 +160,11 @@ Adhere strictly to an **8.dp base grid** (with occasional 4.dp micro-increments)
 
 ### 5.8 Smart Navigation Bar (Meal | Insights | Ask AI)
 - Replaces legacy `Meal | JSON | Database` tabs.
-- Clean segmented pill or bottom tab bar with 3 states:
+- Clean segmented navigation bar featuring exactly 3 balanced tabs:
   1. **Meal:** The core inspection, image header, and item breakdown.
   2. **Insights:** Direct scroll / focus on the AI nutrition insights and breakdown charts.
   3. **Ask AI:** Instantly opens the conversational meal assistant sheet.
+- **Text Wrapping & Density Protection Rule:** Do NOT place auxiliary action buttons (such as "Edit") into the bottom navigation bar row. Squeezing extra buttons shrinks the tab item widths and forces multi-line text wrapping (e.g. "Insight\ns"). The 3 tabs must span the available width with `maxLines = 1` and `softWrap = false`.
 - **Details & Developer Tools:** Secondary overflow menu in TopAppBar (`⋮` icon) containing:
   - View Raw JSON
   - Browse Nutrition Database

@@ -54,7 +54,7 @@ data class FoodCalorieUiState(
     val isTestingApiKey: Boolean = false,
     // Sheet & Dialog Visibility (Progressive Disclosure)
     val showAdjustMealSheet: Boolean = false,
-    val showAddFoodSheet: Boolean = false,
+    val adjustSheetInAddMode: Boolean = false,
     val showAskAiSheet: Boolean = false,
     val showJsonDialog: Boolean = false,
     val showDatabaseDialog: Boolean = false,
@@ -427,20 +427,24 @@ class FoodCalorieViewModel(
         }
     }
 
-    fun openAdjustMealSheet() {
-        _uiState.update { it.copy(showAdjustMealSheet = true) }
+    fun openAdjustMealSheet(startInAddMode: Boolean = false) {
+        _uiState.update { it.copy(showAdjustMealSheet = true, adjustSheetInAddMode = startInAddMode) }
+    }
+
+    fun setAdjustSheetAddMode(inAddMode: Boolean) {
+        _uiState.update { it.copy(adjustSheetInAddMode = inAddMode) }
     }
 
     fun closeAdjustMealSheet() {
-        _uiState.update { it.copy(showAdjustMealSheet = false) }
+        _uiState.update { it.copy(showAdjustMealSheet = false, adjustSheetInAddMode = false) }
     }
 
     fun openAddFoodSheet() {
-        _uiState.update { it.copy(showAddFoodSheet = true) }
+        openAdjustMealSheet(startInAddMode = true)
     }
 
     fun closeAddFoodSheet() {
-        _uiState.update { it.copy(showAddFoodSheet = false) }
+        _uiState.update { it.copy(adjustSheetInAddMode = false) }
     }
 
     fun openAskAiSheet() {
@@ -580,6 +584,7 @@ class FoodCalorieViewModel(
             it.copy(
                 activeMealResult = updatedMeal,
                 analysisState = AnalysisUiState.Success(updatedMeal),
+                adjustSheetInAddMode = false,
                 feedbackBanner = "Added ${newItem.name} (${weightGrams.roundToInt()}g). Recalculated!"
             )
         }
