@@ -1,0 +1,6 @@
+{
+  "name": "Food Calorie AI",
+  "description": "AI-powered food identification, portion estimation, and nutrition analysis MVP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
