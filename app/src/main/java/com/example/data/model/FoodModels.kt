@@ -56,6 +56,26 @@ data class MealTotals(
 )
 
 /**
+ * Concise health and nutrition pointers derived from the final edited meal.
+ */
+data class NutritionInsights(
+    val headline: String,
+    val positives: List<String>,
+    val concerns: List<String>,
+    val suggestions: List<String>
+)
+
+/**
+ * Chat Q&A message for the "Ask About This Food" feature.
+ */
+data class ChatMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val isUser: Boolean,
+    val text: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
  * Complete meal analysis result including items, totals, uncertainty explanation, and overall confidence.
  */
 data class MealAnalysisResult(

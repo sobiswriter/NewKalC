@@ -4,8 +4,10 @@ import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
+import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
 import com.example.data.model.MealAnalysisResult
+import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +19,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 class GeminiFoodService {
 
@@ -505,4 +508,329 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             }
         }
     }
+
+    /**
+     * Generates concise, actionable health & nutrition pointers from the final edited meal.
+     */
+    suspend fun generateNutritionInsights(
+        meal: MealAnalysisResult,
+        providedApiKey: String? = null
+    ): Result<NutritionInsights> = withContext(Dispatchers.IO) {
+        val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: BuildConfig.GEMINI_API_KEY.trim())
+        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+
+        if (!isRealKey) {
+            return@withContext Result.success(getDeterministicNutritionInsights(meal))
+        }
+
+        try {
+            val total = meal.total
+            val foodsSummary = meal.foods.joinToString(", ") {
+                "${it.name} (${it.weightGrams.roundToInt()}g, ${it.calories} kcal, P:${it.protein}g C:${it.carbs}g F:${it.fat}g)"
+            }
+
+            val prompt = """
+You are an expert clinical dietitian analyzing a user's final edited meal.
+Meal items: $foodsSummary
+Total: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
+
+Generate concise, helpful nutrition pointers:
+1. "headline": One punchy summary sentence about this meal's nutritional balance.
+2. "positives": Array of 2-3 specific nutritional strengths of these foods and amounts.
+3. "concerns": Array of 1-2 honest nutritional points to be mindful of (e.g. sodium, saturated fats, refined carb density).
+4. "suggestions": Array of 2 practical, simple improvement swaps or adjustments.
+
+Respond strictly with valid JSON without markdown fences matching this schema:
+{
+  "headline": "High-protein recovery meal with balanced slow-digesting carbs.",
+  "positives": ["Rich in lean protein for muscle repair", "Good dietary fiber from veggies"],
+  "concerns": ["Moderate cooking oil elevates saturated fat"],
+  "suggestions": ["Swap refined rice for brown rice or quinoa", "Add a squeeze of fresh lemon for vitamin C"]
 }
+""".trimIndent()
+
+            val requestJson = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", prompt) })
+                        })
+                    })
+                })
+                put("generationConfig", JSONObject().apply {
+                    put("responseMimeType", "application/json")
+                    put("temperature", 0.3)
+                })
+            }
+
+            for (modelName in candidateModels) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestJson.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string()
+
+                    if (response.isSuccessful && responseBody != null) {
+                        val parsed = parseNutritionInsights(responseBody)
+                        return@withContext Result.success(parsed)
+                    }
+                } catch (e: Exception) {
+                    Log.w("GeminiFoodService", "Insights call failed with $modelName: ${e.message}")
+                }
+            }
+
+            Result.success(getDeterministicNutritionInsights(meal))
+        } catch (e: Exception) {
+            Log.e("GeminiFoodService", "Error generating insights: ${e.message}")
+            Result.success(getDeterministicNutritionInsights(meal))
+        }
+    }
+
+    private fun parseNutritionInsights(responseJsonString: String): NutritionInsights {
+        val root = JSONObject(responseJsonString)
+        val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+        val text = candidate?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "{}"
+
+        val clean = text.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+        val json = JSONObject(clean)
+        val headline = json.optString("headline", "Balanced nutritional profile with good energy delivery.")
+
+        val positives = mutableListOf<String>()
+        val posArray = json.optJSONArray("positives")
+        if (posArray != null) {
+            for (i in 0 until posArray.length()) positives.add(posArray.getString(i))
+        }
+
+        val concerns = mutableListOf<String>()
+        val conArray = json.optJSONArray("concerns")
+        if (conArray != null) {
+            for (i in 0 until conArray.length()) concerns.add(conArray.getString(i))
+        }
+
+        val suggestions = mutableListOf<String>()
+        val sugArray = json.optJSONArray("suggestions")
+        if (sugArray != null) {
+            for (i in 0 until sugArray.length()) suggestions.add(sugArray.getString(i))
+        }
+
+        return NutritionInsights(
+            headline = headline,
+            positives = if (positives.isNotEmpty()) positives else listOf("Provides sustained caloric energy"),
+            concerns = if (concerns.isNotEmpty()) concerns else listOf("Watch cooking oils/fats if targeting weight loss"),
+            suggestions = if (suggestions.isNotEmpty()) suggestions else listOf("Hydrate well and pair with fresh greens")
+        )
+    }
+
+    fun getDeterministicNutritionInsights(meal: MealAnalysisResult): NutritionInsights {
+        val total = meal.total
+        val foodNames = meal.foods.joinToString(", ") { it.name.lowercase() }
+
+        val positives = mutableListOf<String>()
+        val concerns = mutableListOf<String>()
+        val suggestions = mutableListOf<String>()
+
+        // Protein analysis
+        if (total.protein >= 24.0) {
+            positives.add("Excellent protein density (${total.protein}g) supporting muscle repair and prolonged satiety.")
+        } else if (total.protein < 14.0) {
+            concerns.add("Relatively low in protein (${total.protein}g), which may cause earlier hunger.")
+            suggestions.add("Add a boiled egg, tofu, or paneer (+6-12g protein) to improve satiety.")
+        } else {
+            positives.add("Moderate protein content (${total.protein}g) suitable for a daily balanced meal.")
+        }
+
+        // Carbohydrates & Fiber
+        if (total.carbs > 65.0) {
+            concerns.add("High carbohydrate load (${total.carbs}g). Great for workout fuel, but may cause an energy dip if inactive.")
+            suggestions.add("Consider reducing grain/noodle portion by 20% and adding more fiber-rich greens.")
+        } else {
+            positives.add("Controlled carbohydrate portion (${total.carbs}g) promoting steady blood glucose levels.")
+        }
+
+        // Fats
+        if (total.fat > 22.0) {
+            concerns.add("Higher fat content (${total.fat}g), likely from cooking oils, sautéing, or animal fats.")
+            suggestions.add("Use a light oil spray or air-fry preparation to save 80-120 calories.")
+        } else {
+            positives.add("Healthy moderate fat profile (${total.fat}g).")
+        }
+
+        // Veggies & Micro-nutrients
+        if (foodNames.contains("salad") || foodNames.contains("broccoli") || foodNames.contains("vegetable")) {
+            positives.add("Rich in essential micronutrients and dietary fiber from visible greens.")
+        } else {
+            suggestions.add("Add a side of raw cucumber, tomato, or leafy greens to slow gastric emptying.")
+        }
+
+        val headline = when {
+            total.protein >= 25.0 -> "High-protein meal with solid nutritional density."
+            total.calories < 450 -> "Light, calorie-controlled plate suitable for fat loss."
+            total.carbs > 60.0 -> "Energy-dense meal loaded with complex carbohydrates."
+            else -> "Well-proportioned meal with balanced macronutrients."
+        }
+
+        return NutritionInsights(
+            headline = headline,
+            positives = positives.take(3),
+            concerns = concerns.take(2),
+            suggestions = suggestions.take(2)
+        )
+    }
+
+    /**
+     * "Ask About This Food": Answers user questions dynamically based on the current
+     * edited meal components, calculated nutrition, and image context.
+     */
+    suspend fun askAboutFood(
+        question: String,
+        meal: MealAnalysisResult,
+        previousChat: List<ChatMessage>,
+        bitmap: Bitmap?,
+        providedApiKey: String? = null,
+        userAddedFoods: List<String> = emptyList(),
+        userRemovedFoods: List<String> = emptyList()
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: BuildConfig.GEMINI_API_KEY.trim())
+        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+
+        val total = meal.total
+        val foodListDesc = meal.foods.joinToString("\n") {
+            "- ${it.name}: ${it.weightGrams.roundToInt()}g (${it.calories} kcal, P:${it.protein}g, C:${it.carbs}g, F:${it.fat}g) [${it.cookingMethod}]"
+        }
+
+        val addedDesc = if (userAddedFoods.isNotEmpty()) "User added foods: ${userAddedFoods.joinToString(", ")}" else "No user-added foods"
+        val removedDesc = if (userRemovedFoods.isNotEmpty()) "User removed foods: ${userRemovedFoods.joinToString(", ")}" else "No foods removed"
+
+        if (!isRealKey) {
+            return@withContext Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+        }
+
+        try {
+            val systemContext = """
+You are a friendly, evidence-based nutrition AI assisting a user with their current meal.
+CURRENT MEAL (User Edited):
+$foodListDesc
+TOTALS: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
+$addedDesc
+$removedDesc
+
+Answer the user's question directly, accurately, and concisely (2 to 4 sentences). Base calculations on the exact numbers given above.
+User Question: "$question"
+""".trimIndent()
+
+            val requestJson = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", systemContext) })
+                        })
+                    })
+                })
+                put("generationConfig", JSONObject().apply {
+                    put("temperature", 0.3)
+                })
+            }
+
+            for (modelName in candidateModels) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestJson.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string()
+
+                    if (response.isSuccessful && responseBody != null) {
+                        val root = JSONObject(responseBody)
+                        val text = root.optJSONArray("candidates")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("content")
+                            ?.optJSONArray("parts")
+                            ?.optJSONObject(0)
+                            ?.optString("text")
+
+                        if (!text.isNullOrBlank()) {
+                            return@withContext Result.success(text.trim())
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("GeminiFoodService", "Ask AI failed with $modelName: ${e.message}")
+                }
+            }
+
+            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+        } catch (e: Exception) {
+            Log.e("GeminiFoodService", "Exception in askAboutFood: ${e.message}")
+            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+        }
+    }
+
+    private fun getDeterministicAnswer(
+        question: String,
+        meal: MealAnalysisResult,
+        userAddedFoods: List<String> = emptyList(),
+        userRemovedFoods: List<String> = emptyList()
+    ): String {
+        val q = question.lowercase()
+        val total = meal.total
+        val highestCalorieItem = meal.foods.maxByOrNull { it.calories }
+        val highestFatItem = meal.foods.maxByOrNull { it.fat }
+        val highestProteinItem = meal.foods.maxByOrNull { it.protein }
+
+        return when {
+            q.contains("fat loss") || q.contains("weight loss") || q.contains("deficit") || q.contains("diet") -> {
+                if (total.calories <= 550) {
+                    "Yes, this fits very well into a deficit at ${total.calories} kcal, delivering ${total.protein}g protein to maintain lean mass."
+                } else {
+                    "At ${total.calories} kcal, reducing ${highestCalorieItem?.name ?: "portions"} slightly will make it even friendlier for fat loss."
+                }
+            }
+            q.contains("why") && (q.contains("high") || q.contains("calorie")) -> {
+                if (highestCalorieItem != null) {
+                    "${highestCalorieItem.name} contributes the most calories (${highestCalorieItem.calories} kcal of ${total.calories} kcal total). Moderating its portion by 20-30% is the fastest way to reduce overall energy density."
+                } else {
+                    "Total calories (${total.calories} kcal) are concentrated in carbohydrate sources and cooking fats."
+                }
+            }
+            q.contains("workout") || q.contains("gym") || q.contains("post-workout") -> {
+                if (total.protein >= 20.0) {
+                    "Yes, this is great post-workout fuel! At ${total.calories} kcal, you have ${total.protein}g of protein for muscle synthesis and ${total.carbs}g of carbohydrates to replenish glycogen."
+                } else {
+                    "It provides good carb fuel (${total.carbs}g at ${total.calories} kcal), but post-workout recovery ideally targets 20-30g protein. Consider adding a boiled egg or protein side dish."
+                }
+            }
+            q.contains("fat") || q.contains("lipid") -> {
+                if (highestFatItem != null) {
+                    "${highestFatItem.name} contributes the largest amount of fat (${highestFatItem.fat}g out of ${total.fat}g total, ~${(highestFatItem.fat * 9).roundToInt()} kcal), typically from cooking oils or natural lipids."
+                } else {
+                    "The total fat is ${total.fat}g (~${(total.fat * 9).roundToInt()} kcal), representing approx. ${(total.fat * 900 / total.calories.coerceAtLeast(1)).roundToInt()}% of the ${total.calories} kcal total energy."
+                }
+            }
+            q.contains("protein") || q.contains("enough protein") -> {
+                "This meal currently delivers ${total.protein}g of protein (~${(total.protein * 4).roundToInt()} kcal)" +
+                        (if (highestProteinItem != null) " with ${highestProteinItem.name} being the primary contributor (${highestProteinItem.protein}g)." else ".") +
+                        if (total.protein >= 20.0) " This is an adequate amount for a main meal." else " For higher satiety, adding an egg or paneer would boost it by 6-10g."
+            }
+            q.contains("healthier") || q.contains("better") || q.contains("improve") -> {
+                "To optimize this plate: increase fiber by adding raw crunchy salad or steamed greens, and ensure cooking oils are kept modest to keep calories near ${total.calories} kcal."
+            }
+            else -> {
+                "This meal provides ${total.calories} kcal with ${total.protein}g protein, ${total.carbs}g carbs, and ${total.fat}g fat across ${meal.foods.size} items. Adjusting portions in Adjust Meal will recalculate these numbers deterministically."
+            }
+        }
+    }
+}
+

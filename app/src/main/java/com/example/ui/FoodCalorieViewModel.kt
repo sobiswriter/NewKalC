@@ -10,8 +10,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.auth.ApiKeyRepository
 import com.example.data.gemini.GeminiFoodService
+import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
 import com.example.data.model.MealAnalysisResult
+import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,14 +43,30 @@ data class FoodCalorieUiState(
     val currentImageResId: Int? = R.drawable.sample_thali,
     val currentImageTitle: String = "Indian Thali Platter (Rice + Dal + Aloo Sabzi + Salad)",
     val activeMealResult: MealAnalysisResult? = null,
-    val activeTabIndex: Int = 0, // 0 = Visual Breakdown, 1 = Raw JSON, 2 = Database
+    val originalFoodNames: List<String> = emptyList(),
+    val activeNavTab: Int = 0, // 0 = Meal, 1 = Insights, 2 = Ask AI
     val naturalLanguageCorrection: String = "",
     val feedbackBanner: String? = null,
     val isApiKeyConfigured: Boolean = false,
     val currentApiKeyMasked: String = "",
     val showApiKeyDialog: Boolean = false,
     val isStartupPrompt: Boolean = false,
-    val isTestingApiKey: Boolean = false
+    val isTestingApiKey: Boolean = false,
+    // Sheet & Dialog Visibility (Progressive Disclosure)
+    val showAdjustMealSheet: Boolean = false,
+    val showAddFoodSheet: Boolean = false,
+    val showAskAiSheet: Boolean = false,
+    val showJsonDialog: Boolean = false,
+    val showDatabaseDialog: Boolean = false,
+    val expandedFoodId: String? = null,
+    val insightsExpanded: Boolean = false,
+    // Feature 1 Step 4: AI Nutrition Insights
+    val nutritionInsights: NutritionInsights? = null,
+    val isGeneratingInsights: Boolean = false,
+    // Feature 1 Step 5: "Ask About This Food" Q&A
+    val chatMessages: List<ChatMessage> = emptyList(),
+    val isAskingQuestion: Boolean = false,
+    val currentQuestionInput: String = ""
 )
 
 class FoodCalorieViewModel(
@@ -82,7 +100,7 @@ class FoodCalorieViewModel(
             hint = "chicken biryani raita salad"
         ),
         SampleFoodPreset(
-            title = "Salmon Fitness Bowl",
+            title = "Salmon Bowl",
             subtitle = "Grilled Salmon, Quinoa, Broccoli, Avocado",
             drawableResId = R.drawable.sample_salmon,
             hint = "grilled salmon quinoa broccoli avocado"
@@ -95,12 +113,21 @@ class FoodCalorieViewModel(
 
     private fun preloadDefaultSample() {
         val defaultResult = geminiService.getDeterministicFallbackAnalysis("rice dal aloo sabzi salad")
+        val defaultInsights = geminiService.getDeterministicNutritionInsights(defaultResult)
         _uiState.update {
             it.copy(
                 activeMealResult = defaultResult,
+                originalFoodNames = defaultResult.foods.map { food -> food.name },
                 analysisState = AnalysisUiState.Success(defaultResult),
+                nutritionInsights = defaultInsights,
                 currentImageResId = R.drawable.sample_thali,
-                currentImageTitle = "Indian Thali (Rice + Dal + Aloo Sabzi + Salad)"
+                currentImageTitle = "Indian Thali (Rice + Dal + Aloo Sabzi + Salad)",
+                chatMessages = listOf(
+                    ChatMessage(
+                        isUser = false,
+                        text = "Hello! I have analyzed this meal. Ask me anything about its calorie density, protein balance, or how to tweak it!"
+                    )
+                )
             )
         }
     }
@@ -141,12 +168,11 @@ class FoodCalorieViewModel(
                         isApiKeyConfigured = true,
                         currentApiKeyMasked = maskApiKey(cleanKey),
                         showApiKeyDialog = false,
-                        feedbackBanner = "Google AI Studio API Key connected successfully! Real-time AI analysis is active."
+                        feedbackBanner = "Google AI Studio API Key connected! Gemini 3.8 Flash is active."
                     )
                 }
                 onDone(true, "Connected successfully!")
             }.onFailure { error ->
-                // Still allow saving if user insists or in offline network
                 apiKeyRepository.saveApiKey(cleanKey)
                 apiKeyRepository.setStartupPromptDismissed(true)
                 _uiState.update {
@@ -187,10 +213,12 @@ class FoodCalorieViewModel(
     fun useOfflineAnalysisForCurrentImage() {
         val state = _uiState.value
         val fallback = geminiService.getDeterministicFallbackAnalysis(state.currentImageTitle)
+        val insights = geminiService.getDeterministicNutritionInsights(fallback)
         _uiState.update {
             it.copy(
                 activeMealResult = fallback,
                 analysisState = AnalysisUiState.Success(fallback),
+                nutritionInsights = insights,
                 feedbackBanner = "Resolved using verified offline database."
             )
         }
@@ -261,18 +289,18 @@ class FoodCalorieViewModel(
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
             val hasKey = effectiveKey.isNotEmpty()
 
-            val step1 = if (hasKey) "Step 1/4: Google Gemini Vision identifying recognizable food items..."
-            else "Step 1/4: Vision Engine identifying recognizable food items (Demo Mode)..."
+            val step1 = if (hasKey) "Step 1/4: Gemini 3.8 Flash Vision identifying foods..."
+            else "Step 1/4: Vision Engine identifying foods (Demo Mode)..."
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing(step1))
             }
-            delay(400)
+            delay(350)
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing("Step 2/4: Estimating portions using plate and vessel geometry..."))
             }
-            delay(350)
+            delay(300)
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing("Step 3/4: Resolving macros from Nutrition Database..."))
@@ -288,10 +316,13 @@ class FoodCalorieViewModel(
                 _uiState.update {
                     it.copy(
                         activeMealResult = mealResult,
+                        originalFoodNames = mealResult.foods.map { food -> food.name },
                         analysisState = AnalysisUiState.Success(mealResult),
                         feedbackBanner = "Analysis complete! ${mealResult.foods.size} food items resolved."
                     )
                 }
+                // Step 4: Generate concise AI nutrition insights from the meal
+                refreshInsights(mealResult)
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
@@ -305,14 +336,178 @@ class FoodCalorieViewModel(
         }
     }
 
-    fun setActiveTab(index: Int) {
-        _uiState.update { it.copy(activeTabIndex = index) }
+    /**
+     * Generates or refreshes the AI Nutrition Insights based on the current edited meal.
+     */
+    fun refreshInsights(meal: MealAnalysisResult? = _uiState.value.activeMealResult) {
+        if (meal == null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGeneratingInsights = true) }
+            val effectiveKey = apiKeyRepository.getEffectiveApiKey()
+            val result = geminiService.generateNutritionInsights(meal, effectiveKey)
+            result.onSuccess { insights ->
+                _uiState.update {
+                    it.copy(
+                        nutritionInsights = insights,
+                        isGeneratingInsights = false
+                    )
+                }
+            }.onFailure {
+                val fallback = geminiService.getDeterministicNutritionInsights(meal)
+                _uiState.update {
+                    it.copy(
+                        nutritionInsights = fallback,
+                        isGeneratingInsights = false
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * "Ask About This Food" Q&A with full meal context
+     */
+    fun onQuestionInputChanged(text: String) {
+        _uiState.update { it.copy(currentQuestionInput = text) }
+    }
+
+    fun askQuestion(questionText: String = _uiState.value.currentQuestionInput) {
+        val q = questionText.trim()
+        if (q.isEmpty()) return
+
+        val currentMeal = _uiState.value.activeMealResult ?: return
+        val currentBitmap = _uiState.value.currentImageBitmap
+        val effectiveKey = apiKeyRepository.getEffectiveApiKey()
+
+        val currentFoodNames = currentMeal.foods.map { it.name }
+        val originalFoods = _uiState.value.originalFoodNames
+        val userAdded = currentFoodNames.filter { it !in originalFoods }
+        val userRemoved = originalFoods.filter { it !in currentFoodNames }
+
+        val userMessage = ChatMessage(isUser = true, text = q)
+        _uiState.update {
+            it.copy(
+                chatMessages = it.chatMessages + userMessage,
+                currentQuestionInput = "",
+                isAskingQuestion = true
+            )
+        }
+
+        viewModelScope.launch {
+            val responseResult = geminiService.askAboutFood(
+                question = q,
+                meal = currentMeal,
+                previousChat = _uiState.value.chatMessages,
+                bitmap = currentBitmap,
+                providedApiKey = effectiveKey,
+                userAddedFoods = userAdded,
+                userRemovedFoods = userRemoved
+            )
+
+            val replyText = responseResult.getOrElse {
+                "Based on your meal totals (${currentMeal.total.calories} kcal, ${currentMeal.total.protein}g protein), this meal provides balanced fuel. Adjusting portions will update these values."
+            }
+
+            val aiMessage = ChatMessage(isUser = false, text = replyText)
+            _uiState.update {
+                it.copy(
+                    chatMessages = it.chatMessages + aiMessage,
+                    isAskingQuestion = false
+                )
+            }
+        }
+    }
+
+    fun setActiveNavTab(tabIndex: Int) {
+        _uiState.update {
+            it.copy(
+                activeNavTab = tabIndex,
+                showAskAiSheet = if (tabIndex == 2) true else it.showAskAiSheet
+            )
+        }
+    }
+
+    fun openAdjustMealSheet() {
+        _uiState.update { it.copy(showAdjustMealSheet = true) }
+    }
+
+    fun closeAdjustMealSheet() {
+        _uiState.update { it.copy(showAdjustMealSheet = false) }
+    }
+
+    fun openAddFoodSheet() {
+        _uiState.update { it.copy(showAddFoodSheet = true) }
+    }
+
+    fun closeAddFoodSheet() {
+        _uiState.update { it.copy(showAddFoodSheet = false) }
+    }
+
+    fun openAskAiSheet() {
+        _uiState.update { it.copy(showAskAiSheet = true, activeNavTab = 2) }
+    }
+
+    fun closeAskAiSheet() {
+        _uiState.update { it.copy(showAskAiSheet = false) }
+    }
+
+    fun openJsonDialog() {
+        _uiState.update { it.copy(showJsonDialog = true) }
+    }
+
+    fun closeJsonDialog() {
+        _uiState.update { it.copy(showJsonDialog = false) }
+    }
+
+    fun openDatabaseDialog() {
+        _uiState.update { it.copy(showDatabaseDialog = true) }
+    }
+
+    fun closeDatabaseDialog() {
+        _uiState.update { it.copy(showDatabaseDialog = false) }
+    }
+
+    fun toggleFoodExpansion(foodId: String) {
+        _uiState.update {
+            it.copy(expandedFoodId = if (it.expandedFoodId == foodId) null else foodId)
+        }
+    }
+
+    fun toggleInsightsExpansion() {
+        _uiState.update { it.copy(insightsExpanded = !it.insightsExpanded) }
+    }
+
+    /**
+     * Explicit deterministic recalculation.
+     * Re-resolves all food macros from the local Nutrition Database, updates totals,
+     * updates AI insight context, and updates Ask AI context.
+     */
+    fun recalculateMeal() {
+        val currentMeal = _uiState.value.activeMealResult ?: return
+        val recalculatedFoods = currentMeal.foods.map { food ->
+            val resolved = NutritionDatabase.resolveNutrition(food.name)
+            food.copy(nutritionReference = resolved)
+        }
+        val updatedMeal = currentMeal.copy(foods = recalculatedFoods)
+        _uiState.update {
+            it.copy(
+                activeMealResult = updatedMeal,
+                analysisState = AnalysisUiState.Success(updatedMeal),
+                showAdjustMealSheet = false,
+                feedbackBanner = "Recalculated: ${updatedMeal.total.calories} kcal · ${updatedMeal.total.protein}g Protein · ${updatedMeal.total.carbs}g Carbs · ${updatedMeal.total.fat}g Fat"
+            )
+        }
+        refreshInsights(updatedMeal)
     }
 
     fun onNaturalLanguageCorrectionChanged(text: String) {
         _uiState.update { it.copy(naturalLanguageCorrection = text) }
     }
 
+    /**
+     * Updates an existing food's portion in grams.
+     * Recalculates all calories and macros instantly using NutritionDatabase!
+     */
     fun updateFoodWeight(foodId: String, newWeightGrams: Double) {
         val currentMeal = _uiState.value.activeMealResult ?: return
         val clampedWeight = newWeightGrams.coerceIn(5.0, 2000.0)
@@ -321,7 +516,7 @@ class FoodCalorieViewModel(
             if (item.id == foodId) {
                 item.copy(
                     weightGrams = clampedWeight,
-                    quantityDescription = "${clampedWeight.roundToInt()} g (user adjusted)"
+                    quantityDescription = "${clampedWeight.roundToInt()} g"
                 )
             } else {
                 item
@@ -333,11 +528,17 @@ class FoodCalorieViewModel(
             it.copy(
                 activeMealResult = updatedMeal,
                 analysisState = AnalysisUiState.Success(updatedMeal),
-                feedbackBanner = "Portion updated to ${clampedWeight.roundToInt()}g. Calories recalculated!"
+                feedbackBanner = "Portion updated to ${clampedWeight.roundToInt()}g. Recalculated!"
             )
         }
+        // Recalculate insights dynamically
+        refreshInsights(updatedMeal)
     }
 
+    /**
+     * Removes an identified food from the meal analysis.
+     * Recalculates all totals instantly using NutritionDatabase!
+     */
     fun removeFoodItem(foodId: String) {
         val currentMeal = _uiState.value.activeMealResult ?: return
         val itemToRemove = currentMeal.foods.firstOrNull { it.id == foodId }
@@ -348,18 +549,24 @@ class FoodCalorieViewModel(
             it.copy(
                 activeMealResult = updatedMeal,
                 analysisState = AnalysisUiState.Success(updatedMeal),
-                feedbackBanner = "Removed ${itemToRemove?.name ?: "item"}. Totals recalculated."
+                feedbackBanner = "Removed ${itemToRemove?.name ?: "item"}. Recalculated!"
             )
         }
+        // Recalculate insights dynamically
+        refreshInsights(updatedMeal)
     }
 
+    /**
+     * Adds a new food item / side dish from the Nutrition Database.
+     * Recalculates all totals instantly using NutritionDatabase!
+     */
     fun addFoodItem(foodName: String, weightGrams: Double = 100.0) {
         val currentMeal = _uiState.value.activeMealResult ?: return
         val resolvedNutrition = NutritionDatabase.resolveNutrition(foodName)
 
         val newItem = DetectedFoodItem(
             name = resolvedNutrition.displayName,
-            quantityDescription = "${weightGrams.roundToInt()} g (user added)",
+            quantityDescription = "${weightGrams.roundToInt()} g",
             weightGrams = weightGrams,
             cookingMethod = "Standard serving",
             confidence = 1.0,
@@ -373,11 +580,16 @@ class FoodCalorieViewModel(
             it.copy(
                 activeMealResult = updatedMeal,
                 analysisState = AnalysisUiState.Success(updatedMeal),
-                feedbackBanner = "Added ${newItem.name} (${weightGrams.roundToInt()}g)."
+                feedbackBanner = "Added ${newItem.name} (${weightGrams.roundToInt()}g). Recalculated!"
             )
         }
+        // Recalculate insights dynamically
+        refreshInsights(updatedMeal)
     }
 
+    /**
+     * Human Correction Parser for text input
+     */
     fun applyNaturalLanguageCorrection(inputCommand: String = _uiState.value.naturalLanguageCorrection) {
         val command = inputCommand.trim().lowercase()
         if (command.isEmpty()) return
@@ -466,7 +678,7 @@ class FoodCalorieViewModel(
 
         _uiState.update {
             it.copy(
-                feedbackBanner = "Could not parse command. Try: 'Chicken Biryani 250 g -> 180 g', 'Remove salad', or 'Add 1 boiled egg'"
+                feedbackBanner = "Could not parse command. Try: 'Noodles to 180g', 'Remove salad', or 'Add 1 boiled egg'"
             )
         }
     }
