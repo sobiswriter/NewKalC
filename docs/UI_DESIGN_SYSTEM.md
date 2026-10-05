@@ -201,3 +201,35 @@ Adhere strictly to an **8.dp base grid** (with occasional 4.dp micro-increments)
 - `AskAiBottomSheet`: Conversational bottom sheet with meal context injection.
 - `SmartNavigationBar`: Compact tri-mode switcher (`Meal` | `Insights` | `Ask AI`).
 - `MealDetailsMenu`: Overflow menu for developer JSON and reference database.
+- `FoodValidationGate`: Two-stage verification UI (rejection vs. low-confidence ambiguous warning) with mandatory dietary disclaimer.
+- `FullScreenImageViewer`: Full-resolution inspection dialog preserving aspect ratio without cropping.
+- `ImageSideDishVerification`: Batch detection preview allowing per-item renaming, portion adjustment, and acceptance into current meal.
+
+---
+
+## 9. Food Validation & Image-Based Side Dishes Patterns
+
+### 9.1 Food Validation Gate
+- **Purpose**: Prevent non-food images or low-confidence ambiguous photos from generating spurious calorie/macro outputs.
+- **States**:
+  - `NonFoodRejection`: When an image contains no recognizable food (people, pets, objects, landscapes). Displays a red safety badge, standard copy: *"Please provide a clear image of food or a meal to analyze."*, and disclaimer: *"Food analysis is an estimate and should not be treated as medical or dietary advice."*
+  - `AmbiguousFoodWarning`: When food confidence is below the configurable threshold (default 65%). Displays an amber warning: *"Couldn't confidently identify the food. Please upload a clearer image showing the food."*
+- **Settings**: Threshold is user-adjustable in AI Settings (40% - 85% range).
+
+### 9.2 Responsive Food Image Viewer
+- Food header image maintains a prominent height (190.dp) with rounded corners (`16.dp`).
+- Tapping the image opens `FullScreenImageViewer` displaying the uncropped food image (`ContentScale.Fit`) with dark backdrop and close action.
+
+### 9.3 Image-Based Additional Foods ("+ Add from Image")
+- Inside the Adjust Meal bottom sheet, users can choose:
+  1. Search / enter food manually
+  2. Select from database presets
+  3. **+ Add from Image**: Takes photo or picks gallery image of side dishes (e.g. raita, pickle, papad).
+- **Batch Verification Card**: Detected items are displayed with:
+  - Editable food name text field
+  - Stepper controls `[-]` and `[+]` for portion weight in grams
+  - Real-time calorie estimate
+  - Remove button per item
+  - "Add to Meal" confirmation button
+- **Single Meal State**: Confirmed items join the single source of truth meal state with `FoodDetectionSource.IMAGE_ADDITION`.
+

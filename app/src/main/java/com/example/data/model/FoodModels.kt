@@ -18,6 +18,36 @@ data class NutritionReference(
     val source: String = "USDA FoodData Central"
 )
 
+enum class FoodDetectionSource {
+    ORIGINAL_IMAGE,
+    IMAGE_ADDITION,
+    MANUAL_SEARCH
+}
+
+/**
+ * Result of the pre-analysis Food Validation Gate.
+ */
+data class FoodValidationResult(
+    val isFood: Boolean,
+    val confidence: Double,
+    val reason: String? = null,
+    val detectedFoodNames: List<String> = emptyList()
+)
+
+/**
+ * Specific validation exceptions thrown by the Food Validation Gate.
+ */
+class NonFoodException(
+    override val message: String = "Please provide a clear image of food or a meal to analyze.",
+    val disclaimer: String = "Food analysis is an estimate and should not be treated as medical or dietary advice."
+) : Exception(message)
+
+class AmbiguousFoodException(
+    override val message: String = "Couldn't confidently identify the food. Please upload a clearer image showing the food.",
+    val confidence: Double = 0.0,
+    val disclaimer: String = "Food analysis is an estimate and should not be treated as medical or dietary advice."
+) : Exception(message)
+
 /**
  * An identified food item with detected amount, portion weight, visual reasoning, and resolved nutrition.
  */
@@ -29,7 +59,10 @@ data class DetectedFoodItem(
     val cookingMethod: String = "Standard preparation",
     val confidence: Double = 0.85,
     val visualCues: String = "Estimated from dish boundaries and depth",
-    val nutritionReference: NutritionReference
+    val nutritionReference: NutritionReference,
+    val source: FoodDetectionSource = FoodDetectionSource.ORIGINAL_IMAGE,
+    val assumptions: String = "Portion estimated from visible vessel dimensions; standard preparation assumed.",
+    val nutritionDataSource: String = "Verified Nutrition Database (USDA FoodData Central reference)"
 ) {
     // Calculated directly from the Nutrition Database source of truth:
     val calories: Int

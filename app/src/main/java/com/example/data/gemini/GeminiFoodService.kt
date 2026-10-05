@@ -4,9 +4,12 @@ import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
+import com.example.data.model.AmbiguousFoodException
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
+import com.example.data.model.FoodDetectionSource
 import com.example.data.model.MealAnalysisResult
+import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
 import kotlinx.coroutines.Dispatchers
@@ -118,14 +121,19 @@ class GeminiFoodService {
         Result.failure(Exception("API Key validation failed ($lastErrorMsg)"))
     }
 
+    companion object {
+        const val DEFAULT_FOOD_VALIDATION_THRESHOLD = 0.65
+    }
+
     /**
      * Analyzes a food image using the updated Gemini Vision model (gemini-3.8-flash)
-     * and resolves nutrition from the nutrition database.
+     * with a mandatory FOOD VALIDATION GATE to reject non-food and ambiguous images.
      */
     suspend fun analyzeFoodImage(
         bitmap: Bitmap,
         sampleContextHint: String? = null,
-        providedApiKey: String? = null
+        providedApiKey: String? = null,
+        validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD
     ): Result<MealAnalysisResult> = withContext(Dispatchers.IO) {
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
@@ -148,25 +156,41 @@ class GeminiFoodService {
             val base64Image = bitmapToBase64(bitmap)
 
             val prompt = """
-You are a specialized food identification and portion estimation engine.
-Analyze this food image:
-1. Identify every distinct, recognizable food item visible on the plate/bowl/table.
-2. For each item determine:
+You are a specialized food identification and nutrition analysis engine with a STRICT food-validation gate.
+
+STEP 1: STRICT FOOD VALIDATION GATE (Mandatory)
+Examine the image carefully:
+- Does this image clearly depict recognizable FOOD, a MEAL, BEVERAGE, or EDIBLE INGREDIENTS?
+- If the image contains a PERSON (selfie, face, human portrait, body, hands without food), ANIMAL/PET, OBJECT, COMPUTER, FURNITURE, LANDSCAPE, SCREENSHOT, or anything that is NOT food:
+  Set "is_food": false, "food_confidence": 0.0, "detected_foods": [], and specify "rejection_reason" (e.g. "Human photo detected - no food").
+- If the image is blurry, ambiguous, or food cannot be recognized with reasonable confidence (>= $validationThreshold):
+  Set "is_food": false, "food_confidence": <score>, "detected_foods": [], and specify "rejection_reason" ("Ambiguous or unclear food").
+- ONLY if clear food is identified, set "is_food": true and "food_confidence" to your confidence score.
+
+STEP 2: FOOD IDENTIFICATION & PORTION ESTIMATION (ONLY IF is_food IS TRUE)
+If is_food is true:
+- Identify every distinct, recognizable food item visible on the plate/bowl/table.
+- For each item determine:
    - food name
    - approximate quantity description (e.g. "1 medium bowl", "1 fillet", "1 cup")
    - estimated portion weight in grams (use visual cues: plate size ~26cm, bowl depth, food volume, density)
    - cooking method when visually inferable (e.g. steamed, pan-seared, stir-fried, dum-cooked, deep-fried, raw)
-   - confidence score between 0.0 and 1.0 (do not pretend uncertain items are certain)
+   - confidence score between 0.0 and 1.0
    - visual cues used for portion estimation
-   - estimated reference calories per 100g (backup reference)
+   - estimated reference calories per 100g
    - estimated reference protein per 100g
    - estimated reference carbs per 100g
    - estimated reference fat per 100g
-3. Calculate overall meal confidence (0.0 to 1.0).
-4. Provide an uncertainty explanation (e.g. "Portion size is the largest source of uncertainty; cooking oils may vary calories by ±10%").
+- Calculate overall meal confidence (0.0 to 1.0).
+- Provide an uncertainty explanation.
+
+If is_food is false, "detected_foods" MUST be an empty array [].
 
 Respond strictly with valid JSON without markdown fences matching this schema:
 {
+  "is_food": true,
+  "food_confidence": 0.85,
+  "rejection_reason": null,
   "detected_foods": [
     {
       "name": "Chicken Biryani",
@@ -225,7 +249,11 @@ Respond strictly with valid JSON without markdown fences matching this schema:
 
                     if (response.isSuccessful && responseBody != null) {
                         Log.d("GeminiFoodService", "Successfully analyzed with model $modelName")
-                        val parsedMeal = parseGeminiResponse(responseBody)
+                        val parsedMeal = parseGeminiResponse(
+                            responseJsonString = responseBody,
+                            validationThreshold = validationThreshold,
+                            source = FoodDetectionSource.ORIGINAL_IMAGE
+                        )
                         return@withContext Result.success(parsedMeal)
                     } else {
                         val errMsg = try {
@@ -240,27 +268,164 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 } catch (e: Exception) {
                     Log.w("GeminiFoodService", "Exception with model $modelName: ${e.message}")
                     lastError = e
+                    // If it's a validation exception (non-food/ambiguous), don't retry with other models, fail fast!
+                    if (e is NonFoodException || e is AmbiguousFoodException) {
+                        return@withContext Result.failure(e)
+                    }
                 }
             }
 
-            // If sample preset, we can still fall back smoothly
-            if (sampleContextHint != null) {
-                return@withContext Result.success(getDeterministicFallbackAnalysis(sampleContextHint))
-            }
             Result.failure(lastError ?: Exception("Failed to analyze image with Gemini AI."))
         } catch (e: Exception) {
             Log.e("GeminiFoodService", "Exception during Gemini analysis: ${e.message}", e)
-            if (sampleContextHint != null) {
-                return@withContext Result.success(getDeterministicFallbackAnalysis(sampleContextHint))
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Analyzes an additional food/side dish image (e.g. raita, papad, salad).
+     * Runs through the strict food validation gate and returns detected items for user verification.
+     */
+    suspend fun analyzeAdditionalFoodImage(
+        bitmap: Bitmap,
+        providedApiKey: String? = null,
+        validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD
+    ): Result<List<DetectedFoodItem>> = withContext(Dispatchers.IO) {
+        val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
+            ?: BuildConfig.GEMINI_API_KEY.trim())
+        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+
+        if (!isRealKey) {
+            // In demo mode without API key, return verified side dish preset
+            val raitaRef = NutritionDatabase.resolveNutrition("Cucumber Raita")
+            val papadRef = NutritionDatabase.resolveNutrition("Roasted Papad")
+            return@withContext Result.success(
+                listOf(
+                    DetectedFoodItem(
+                        name = "Cucumber Raita",
+                        quantityDescription = "1 small bowl (~100g)",
+                        weightGrams = 100.0,
+                        cookingMethod = "Whisked spiced yogurt with cucumber",
+                        confidence = 0.90,
+                        visualCues = "Side bowl diameter ~8cm",
+                        nutritionReference = raitaRef,
+                        source = FoodDetectionSource.IMAGE_ADDITION
+                    ),
+                    DetectedFoodItem(
+                        name = "Roasted Papad",
+                        quantityDescription = "1 crisp disc (~15g)",
+                        weightGrams = 15.0,
+                        cookingMethod = "Dry flame roasted",
+                        confidence = 0.85,
+                        visualCues = "Thin crispy round wafer ~15cm",
+                        nutritionReference = papadRef,
+                        source = FoodDetectionSource.IMAGE_ADDITION
+                    )
+                )
+            )
+        }
+
+        try {
+            val base64Image = bitmapToBase64(bitmap)
+
+            val prompt = """
+You are a specialized side dish food identification engine with a STRICT food-validation gate.
+
+STEP 1: STRICT FOOD VALIDATION GATE (Mandatory)
+Examine the image carefully:
+- Does this image contain recognizable, edible FOOD, SIDE DISH, BEVERAGE, or SNACK?
+- If the image contains a PERSON, selfie, face, body, animal, pet, object, document, or non-food:
+  Set "is_food": false, "food_confidence": 0.0, "detected_foods": [], and specify "rejection_reason".
+- If ambiguous or food cannot be recognized with reasonable confidence (>= $validationThreshold):
+  Set "is_food": false, "food_confidence": <score>, "detected_foods": [], and specify "rejection_reason".
+
+STEP 2: SIDE DISH IDENTIFICATION (Multiple items supported!)
+Identify every distinct food item visible in this side dish photo (e.g. raita, pickle, papad, fries, bread, chutney).
+For each item estimate portion weight in grams, quantity description, and cooking method.
+
+Respond strictly with valid JSON without markdown fences matching this schema:
+{
+  "is_food": true,
+  "food_confidence": 0.88,
+  "rejection_reason": null,
+  "detected_foods": [
+    {
+      "name": "Cucumber Raita",
+      "quantity_description": "1 small bowl (~100g)",
+      "estimated_weight_grams": 100.0,
+      "cooking_method": "Whisked yogurt with cucumber",
+      "confidence": 0.88,
+      "visual_cues": "Side bowl diameter ~8cm",
+      "ref_calories_per_100g": 60.0,
+      "ref_protein_per_100g": 3.0,
+      "ref_carbs_per_100g": 4.5,
+      "ref_fat_per_100g": 3.2
+    }
+  ]
+}
+""".trimIndent()
+
+            val requestJson = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", prompt) })
+                            put(JSONObject().apply {
+                                put("inlineData", JSONObject().apply {
+                                    put("mimeType", "image/jpeg")
+                                    put("data", base64Image)
+                                })
+                            })
+                        })
+                    })
+                })
+                put("generationConfig", JSONObject().apply {
+                    put("responseMimeType", "application/json")
+                    put("temperature", 0.2)
+                })
             }
+
+            for (modelName in candidateModels) {
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestJson.toString().toRequestBody(jsonMediaType))
+                        .build()
+
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string()
+
+                    if (response.isSuccessful && responseBody != null) {
+                        val parsedMeal = parseGeminiResponse(
+                            responseJsonString = responseBody,
+                            validationThreshold = validationThreshold,
+                            source = FoodDetectionSource.IMAGE_ADDITION
+                        )
+                        return@withContext Result.success(parsedMeal.foods)
+                    }
+                } catch (e: Exception) {
+                    if (e is NonFoodException || e is AmbiguousFoodException) {
+                        return@withContext Result.failure(e)
+                    }
+                }
+            }
+
+            Result.failure(Exception("Failed to analyze side dish image."))
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /**
      * Parses the JSON from Gemini, separating vision food identification from the Nutrition Database.
+     * Enforces the Food Validation Gate to reject non-food and ambiguous images before nutrition calculation.
      */
-    private fun parseGeminiResponse(responseJsonString: String): MealAnalysisResult {
+    private fun parseGeminiResponse(
+        responseJsonString: String,
+        validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD,
+        source: FoodDetectionSource = FoodDetectionSource.ORIGINAL_IMAGE
+    ): MealAnalysisResult {
         val root = JSONObject(responseJsonString)
         val candidates = root.optJSONArray("candidates")
         val candidate = candidates?.optJSONObject(0)
@@ -275,8 +440,41 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             .trim()
 
         val parsedObj = JSONObject(cleanJson)
+
+        // 1. FOOD VALIDATION GATE (Mandatory)
+        val isFood = parsedObj.optBoolean("is_food", true)
+        val foodConfidence = parsedObj.optDouble("food_confidence", 1.0)
+        val rejectionReason = parsedObj.optString("rejection_reason", "")
+
+        if (!isFood) {
+            val lowerReason = rejectionReason.lowercase()
+            if (lowerReason.contains("ambiguous") || lowerReason.contains("unclear") || lowerReason.contains("confidence")) {
+                throw AmbiguousFoodException(
+                    message = "Couldn't confidently identify the food. Please upload a clearer image showing the food.",
+                    confidence = foodConfidence
+                )
+            } else {
+                throw NonFoodException(
+                    message = "Please provide a clear image of food or a meal to analyze."
+                )
+            }
+        }
+
+        if (foodConfidence < validationThreshold) {
+            throw AmbiguousFoodException(
+                message = "Couldn't confidently identify the food. Please upload a clearer image showing the food.",
+                confidence = foodConfidence
+            )
+        }
+
         val foodsArray = parsedObj.optJSONArray("detected_foods") ?: JSONArray()
-        val overallConfidence = parsedObj.optDouble("overall_confidence", 0.82)
+        if (foodsArray.length() == 0) {
+            throw NonFoodException(
+                message = "Please provide a clear image of food or a meal to analyze."
+            )
+        }
+
+        val overallConfidence = parsedObj.optDouble("overall_confidence", foodConfidence.coerceAtMost(0.85))
         val uncertaintyExplanation = parsedObj.optString(
             "uncertainty_explanation",
             "Portion volume and cooking oil absorption are the primary sources of uncertainty."
@@ -289,7 +487,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             val quantityDesc = item.optString("quantity_description", "1 serving")
             val weight = item.optDouble("estimated_weight_grams", 150.0)
             val cookingMethod = item.optString("cooking_method", "Cooked")
-            val confidence = item.optDouble("confidence", 0.8)
+            val confidence = item.optDouble("confidence", foodConfidence)
             val visualCues = item.optString("visual_cues", "Estimated from dish boundaries and visual scale")
 
             // NUTRITION RESOLUTION STEP:
@@ -310,13 +508,12 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                     cookingMethod = cookingMethod,
                     confidence = confidence,
                     visualCues = visualCues,
-                    nutritionReference = resolvedNutrition
+                    nutritionReference = resolvedNutrition,
+                    source = source,
+                    assumptions = "Portion estimated from visible vessel dimensions; visual estimation variance ±12%.",
+                    nutritionDataSource = resolvedNutrition.source
                 )
             )
-        }
-
-        if (foodItems.isEmpty()) {
-            return getDeterministicFallbackAnalysis(null)
         }
 
         return MealAnalysisResult(

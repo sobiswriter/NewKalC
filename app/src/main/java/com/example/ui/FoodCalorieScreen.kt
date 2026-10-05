@@ -4,8 +4,11 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,10 +70,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -91,6 +96,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -125,9 +131,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
+import com.example.data.model.FoodDetectionSource
 import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
@@ -179,27 +189,138 @@ fun FoodCalorieScreen(
         if (isGranted) {
             try {
                 cameraLauncher.launch(null)
-            } catch (e: Exception) {
-                Toast.makeText(context, "Unable to launch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+            } catch (e: Throwable) {
+                Toast.makeText(context, "Could not open camera (${e.message}). Opening photo library...", Toast.LENGTH_SHORT).show()
+                galleryLauncher.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                    )
+                )
             }
         } else {
-            Toast.makeText(context, "Camera permission is required to photograph your food", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Camera permission needed to take food photos. You can upload photos using the image button.", Toast.LENGTH_LONG).show()
         }
     }
 
     val launchCameraSafely = {
-        val permissionCheck = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.CAMERA
-        )
-        if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+        val hasCameraFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+        val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        val resolveInfo = context.packageManager.resolveActivity(captureIntent, PackageManager.MATCH_DEFAULT_ONLY)
+
+        if (!hasCameraFeature && resolveInfo == null) {
+            Toast.makeText(context, "No camera application found on device. Opening photo gallery...", Toast.LENGTH_SHORT).show()
+            galleryLauncher.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                )
+            )
+        } else {
+            val permissionCheck = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            )
+            if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+                try {
+                    cameraLauncher.launch(null)
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "Could not open camera (${e.message}). Opening photo gallery...", Toast.LENGTH_SHORT).show()
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }
+            } else {
+                try {
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "Camera permission unavailable. Opening photo gallery...", Toast.LENGTH_SHORT).show()
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    // Side Dish / Additional Food Media Pickers
+    val sideDishGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.onSideDishImageSelectedFromUri(context, uri)
+        }
+    }
+
+    val sideDishCameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            viewModel.onSideDishCameraCaptured(bitmap)
+        }
+    }
+
+    val sideDishCameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
             try {
-                cameraLauncher.launch(null)
-            } catch (e: Exception) {
-                Toast.makeText(context, "Unable to launch camera: ${e.message}", Toast.LENGTH_SHORT).show()
+                sideDishCameraLauncher.launch(null)
+            } catch (e: Throwable) {
+                Toast.makeText(context, "Camera unavailable. Opening photo gallery...", Toast.LENGTH_SHORT).show()
+                sideDishGalleryLauncher.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                    )
+                )
             }
         } else {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            Toast.makeText(context, "Camera permission needed to snap side dishes", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val launchSideDishCameraSafely = {
+        val hasCameraFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+        val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+        val resolveInfo = context.packageManager.resolveActivity(captureIntent, PackageManager.MATCH_DEFAULT_ONLY)
+
+        if (!hasCameraFeature && resolveInfo == null) {
+            Toast.makeText(context, "No camera application found. Opening photo gallery...", Toast.LENGTH_SHORT).show()
+            sideDishGalleryLauncher.launch(
+                androidx.activity.result.PickVisualMediaRequest(
+                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                )
+            )
+        } else {
+            val permissionCheck = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            )
+            if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+                try {
+                    sideDishCameraLauncher.launch(null)
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "Could not open camera (${e.message}). Opening photo gallery...", Toast.LENGTH_SHORT).show()
+                    sideDishGalleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }
+            } else {
+                try {
+                    sideDishCameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                } catch (e: Throwable) {
+                    Toast.makeText(context, "Camera permission unavailable. Opening photo gallery...", Toast.LENGTH_SHORT).show()
+                    sideDishGalleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -279,11 +400,7 @@ fun FoodCalorieScreen(
                             title = uiState.currentImageTitle,
                             onAdjustClick = { viewModel.openAdjustMealSheet() },
                             onImageClick = {
-                                galleryLauncher.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(
-                                        ActivityResultContracts.PickVisualMedia.ImageOnly
-                                    )
-                                )
+                                viewModel.openFullScreenImageViewer()
                             }
                         )
                     }
@@ -384,6 +501,26 @@ fun FoodCalorieScreen(
             onUpdateWeight = { foodId, newWeight -> viewModel.updateFoodWeight(foodId, newWeight) },
             onRemoveFood = { foodId -> viewModel.removeFoodItem(foodId) },
             onAddFood = { name, grams -> viewModel.addFoodItem(name, grams) },
+            isAnalyzingSideDish = uiState.isAnalyzingSideDish,
+            pendingSideDishes = uiState.pendingSideDishItems,
+            sideDishError = uiState.sideDishError,
+            onPickSideDishGallery = {
+                sideDishGalleryLauncher.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly
+                    )
+                )
+            },
+            onPickSideDishCamera = launchSideDishCameraSafely,
+            onTrySampleSideDish = {
+                val sampleBmp = BitmapFactory.decodeResource(context.resources, R.drawable.sample_biryani)
+                viewModel.analyzeSideDishImage(sampleBmp)
+            },
+            onUpdatePendingName = { index, name -> viewModel.updatePendingSideDishName(index, name) },
+            onUpdatePendingWeight = { index, weight -> viewModel.updatePendingSideDishWeight(index, weight) },
+            onRemovePendingItem = { index -> viewModel.removePendingSideDishItem(index) },
+            onConfirmPendingSideDishes = { viewModel.confirmAddPendingSideDishes() },
+            onCancelPendingSideDishes = { viewModel.cancelPendingSideDishes() },
             onRecalculateDone = { viewModel.recalculateMeal() },
             onDismiss = { viewModel.closeAdjustMealSheet() }
         )
@@ -399,6 +536,16 @@ fun FoodCalorieScreen(
             onQuestionChange = { viewModel.onQuestionInputChanged(it) },
             onSendQuestion = { q -> viewModel.askQuestion(q) },
             onDismiss = { viewModel.closeAskAiSheet() }
+        )
+    }
+
+    // Full Screen Image Viewer Modal
+    if (uiState.showFullScreenImageViewer) {
+        FullScreenImageViewerDialog(
+            bitmap = uiState.currentImageBitmap,
+            resId = uiState.currentImageResId,
+            title = uiState.currentImageTitle,
+            onDismiss = { viewModel.closeFullScreenImageViewer() }
         )
     }
 
@@ -421,13 +568,15 @@ fun FoodCalorieScreen(
         )
     }
 
-    // Dialog: API Key Settings
+    // Dialog: API Key & Validation Settings
     if (uiState.showApiKeyDialog) {
         ApiKeySettingsDialog(
             currentMaskedKey = uiState.currentApiKeyMasked,
             isConfigured = uiState.isApiKeyConfigured,
             isTesting = uiState.isTestingApiKey,
             isStartup = uiState.isStartupPrompt,
+            validationThreshold = uiState.validationThreshold,
+            onThresholdChanged = { viewModel.setValidationThreshold(it) },
             onSaveKey = { key, onDone ->
                 viewModel.saveAndValidateApiKey(key, onDone)
             },
@@ -660,92 +809,128 @@ private fun CollapsibleMealHeader(
                 .padding(16.dp)
         ) {
             if (!isCollapsed) {
-                // EXPANDED STATE
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                // EXPANDED STATE: Large, high-clarity responsive image display (preserves aspect ratio, rounded corners)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(190.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onImageClick() }
+                        .testTag("meal_image_expanded_box")
                 ) {
-                    // Meal Photo Thumbnail
-                    Box(
+                    if (imageBitmap != null) {
+                        Image(
+                            bitmap = imageBitmap.asImageBitmap(),
+                            contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (imageResId != null) {
+                        Image(
+                            painter = painterResource(id = imageResId),
+                            contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Restaurant,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .align(Alignment.Center)
+                        )
+                    }
+
+                    // Floating Pill: Tap to view full screen
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Black.copy(alpha = 0.65f),
                         modifier = Modifier
-                            .size(76.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onImageClick() }
+                            .align(Alignment.BottomEnd)
+                            .padding(10.dp)
                     ) {
-                        if (imageBitmap != null) {
-                            Image(
-                                bitmap = imageBitmap.asImageBitmap(),
-                                contentDescription = "Analyzed food photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else if (imageResId != null) {
-                            Image(
-                                painter = painterResource(id = imageResId),
-                                contentDescription = "Analyzed food photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Restaurant,
+                                imageVector = Icons.Default.ZoomIn,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .align(Alignment.Center)
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "Tap to inspect full screen",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
+                }
 
-                    // Main Total Calorie Callout
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Meal Title & Total Calories Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Estimated ${total.calories} kcal",
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = ColorCalories
-                                )
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Estimated ${total.calories} kcal",
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = ColorCalories
                             )
+                        )
+                    }
+
+                    // Confidence pill
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = when {
+                            confidencePct >= 80 -> Color(0xFFDCFCE7)
+                            confidencePct >= 65 -> Color(0xFFFEF3C7)
+                            else -> Color(0xFFFEE2E2)
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        // Confidence pill
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = when {
-                                confidencePct >= 80 -> Color(0xFFDCFCE7)
-                                confidencePct >= 65 -> Color(0xFFFEF3C7)
-                                else -> Color(0xFFFEE2E2)
-                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = when {
-                                        confidencePct >= 80 -> Color(0xFF16A34A)
-                                        confidencePct >= 65 -> Color(0xFFD97706)
-                                        else -> Color(0xFFDC2626)
-                                    },
-                                    modifier = Modifier.size(6.dp)
-                                ) {}
-                                Text(
-                                    text = "$confidencePct% Confidence (±12% variance)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = when {
-                                        confidencePct >= 80 -> Color(0xFF166534)
-                                        confidencePct >= 65 -> Color(0xFF92400E)
-                                        else -> Color(0xFF991B1B)
-                                    }
-                                )
-                            }
+                            Surface(
+                                shape = CircleShape,
+                                color = when {
+                                    confidencePct >= 80 -> Color(0xFF16A34A)
+                                    confidencePct >= 65 -> Color(0xFFD97706)
+                                    else -> Color(0xFFDC2626)
+                                },
+                                modifier = Modifier.size(6.dp)
+                            ) {}
+                            Text(
+                                text = "$confidencePct% Confidence (±12% variance)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = when {
+                                    confidencePct >= 80 -> Color(0xFF166534)
+                                    confidencePct >= 65 -> Color(0xFF92400E)
+                                    else -> Color(0xFF991B1B)
+                                }
+                            )
                         }
                     }
                 }
@@ -959,11 +1144,41 @@ private fun CompactFoodItemRow(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = food.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = food.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    // Source Badge
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = when (food.source) {
+                            FoodDetectionSource.ORIGINAL_IMAGE -> Color(0xFFEFF6FF)
+                            FoodDetectionSource.IMAGE_ADDITION -> Color(0xFFF3E8FF)
+                            FoodDetectionSource.MANUAL_SEARCH -> Color(0xFFFEF3C7)
+                        }
+                    ) {
+                        Text(
+                            text = when (food.source) {
+                                FoodDetectionSource.ORIGINAL_IMAGE -> "Photo"
+                                FoodDetectionSource.IMAGE_ADDITION -> "Added Image"
+                                FoodDetectionSource.MANUAL_SEARCH -> "Manual"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when (food.source) {
+                                FoodDetectionSource.ORIGINAL_IMAGE -> Color(0xFF1D4ED8)
+                                FoodDetectionSource.IMAGE_ADDITION -> Color(0xFF7E22CE)
+                                FoodDetectionSource.MANUAL_SEARCH -> Color(0xFFB45309)
+                            },
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 Text(
                     text = "${food.weightGrams.roundToInt()} g · ${food.quantityDescription}",
                     style = MaterialTheme.typography.bodySmall,
@@ -1024,15 +1239,26 @@ private fun CompactFoodItemRow(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Prep: ${food.cookingMethod}",
+                        text = "Confidence: ${(food.confidence * 100).roundToInt()}% (${if (food.confidence >= 0.8) "High" else "Medium"} certainty)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Visual cues: ${food.visualCues}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Portion cues: ${food.visualCues}",
+                        text = "Assumptions: ${food.assumptions}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Nutrition database: ${food.nutritionDataSource}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1482,6 +1708,17 @@ private fun AdjustMealBottomSheet(
     onUpdateWeight: (String, Double) -> Unit,
     onRemoveFood: (String) -> Unit,
     onAddFood: (String, Double) -> Unit,
+    isAnalyzingSideDish: Boolean,
+    pendingSideDishes: List<DetectedFoodItem>?,
+    sideDishError: String?,
+    onPickSideDishGallery: () -> Unit,
+    onPickSideDishCamera: () -> Unit,
+    onTrySampleSideDish: () -> Unit,
+    onUpdatePendingName: (Int, String) -> Unit,
+    onUpdatePendingWeight: (Int, Double) -> Unit,
+    onRemovePendingItem: (Int) -> Unit,
+    onConfirmPendingSideDishes: () -> Unit,
+    onCancelPendingSideDishes: () -> Unit,
     onRecalculateDone: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1512,7 +1749,18 @@ private fun AdjustMealBottomSheet(
                         onBack = { onSetAddMode(false) },
                         onFoodAdded = { name, grams ->
                             onAddFood(name, grams)
-                        }
+                        },
+                        isAnalyzingSideDish = isAnalyzingSideDish,
+                        pendingSideDishes = pendingSideDishes,
+                        sideDishError = sideDishError,
+                        onPickSideDishGallery = onPickSideDishGallery,
+                        onPickSideDishCamera = onPickSideDishCamera,
+                        onTrySampleSideDish = onTrySampleSideDish,
+                        onUpdatePendingName = onUpdatePendingName,
+                        onUpdatePendingWeight = onUpdatePendingWeight,
+                        onRemovePendingItem = onRemovePendingItem,
+                        onConfirmPendingSideDishes = onConfirmPendingSideDishes,
+                        onCancelPendingSideDishes = onCancelPendingSideDishes
                     )
                 } else {
                     // MAIN ADJUST MEAL VIEW
@@ -1772,9 +2020,21 @@ private fun MealItemEditRow(
 @Composable
 private fun InlineAddFoodContent(
     onBack: () -> Unit,
-    onFoodAdded: (String, Double) -> Unit
+    onFoodAdded: (String, Double) -> Unit,
+    isAnalyzingSideDish: Boolean,
+    pendingSideDishes: List<DetectedFoodItem>?,
+    sideDishError: String?,
+    onPickSideDishGallery: () -> Unit,
+    onPickSideDishCamera: () -> Unit,
+    onTrySampleSideDish: () -> Unit,
+    onUpdatePendingName: (Int, String) -> Unit,
+    onUpdatePendingWeight: (Int, Double) -> Unit,
+    onRemovePendingItem: (Int) -> Unit,
+    onConfirmPendingSideDishes: () -> Unit,
+    onCancelPendingSideDishes: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var selectedMethodTab by remember { mutableStateOf(0) } // 0 = Search & Database, 1 = + Add from Image
 
     val verifiedFoods = remember {
         listOf(
@@ -1787,6 +2047,8 @@ private fun InlineAddFoodContent(
             "Paneer Bhurji" to 100.0,
             "Yellow Dal Tadka" to 150.0,
             "Greek Yogurt" to 150.0,
+            "Roasted Papad" to 15.0,
+            "Mixed Pickle" to 20.0,
             "Avocado Slices" to 50.0
         )
     }
@@ -1827,9 +2089,265 @@ private fun InlineAddFoodContent(
             }
         }
 
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Three method selector tabs: Search/Select vs + Add from Image
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedMethodTab == 0,
+                onClick = { selectedMethodTab = 0 },
+                label = { Text("Search & Database") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChip(
+                selected = selectedMethodTab == 1,
+                onClick = { selectedMethodTab = 1 },
+                label = { Text("+ Add from Image") },
+                leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Search Bar
+        if (selectedMethodTab == 1 || isAnalyzingSideDish || pendingSideDishes != null || sideDishError != null) {
+            // METHOD C: IMAGE-BASED ADD FOOD & VERIFICATION WORKFLOW
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Add Food from Photo",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "Upload a photo of your side dish or extra food. The AI identifies items and calculates verified nutrition.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (isAnalyzingSideDish) {
+                        // Analyzing with Food Validation Gate indicator
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                            Text(
+                                text = "Food Validation Gate analyzing side dish...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else if (sideDishError != null) {
+                        // Validation rejection or error state
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = sideDishError,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                                Text(
+                                    text = "Food analysis is an estimate and should not be treated as medical or dietary advice.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (pendingSideDishes != null && pendingSideDishes.isNotEmpty()) {
+                        // USER VERIFICATION STATE (Requirements 5 & 6)
+                        Text(
+                            text = "Detected food (${pendingSideDishes.size} item${if (pendingSideDishes.size > 1) "s" else ""})",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            pendingSideDishes.forEachIndexed { index, detectedItem ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Food name editor
+                                            OutlinedTextField(
+                                                value = detectedItem.name,
+                                                onValueChange = { onUpdatePendingName(index, it) },
+                                                label = { Text("Food Name") },
+                                                singleLine = true,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(onClick = { onRemovePendingItem(index) }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Remove detected food",
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // Portion Stepper + Estimated Calories
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(
+                                                    text = "~${detectedItem.weightGrams.roundToInt()} g",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = "~${detectedItem.calories} kcal · ${detectedItem.protein}P · ${detectedItem.carbs}C · ${detectedItem.fat}F",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = ColorCalories,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                FilledTonalButton(
+                                                    onClick = { onUpdatePendingWeight(index, (detectedItem.weightGrams - 25.0).coerceAtLeast(10.0)) },
+                                                    shape = CircleShape,
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                                }
+                                                FilledTonalButton(
+                                                    onClick = { onUpdatePendingWeight(index, detectedItem.weightGrams + 25.0) },
+                                                    shape = CircleShape,
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Add, contentDescription = "Increase")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Confirmation buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = onCancelPendingSideDishes,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Cancel")
+                                }
+                                Button(
+                                    onClick = onConfirmPendingSideDishes,
+                                    modifier = Modifier.weight(1.5f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Add to Meal")
+                                }
+                            }
+                        }
+                    } else {
+                        // Media trigger buttons for "+ Add from Image"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onPickSideDishCamera,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Camera")
+                            }
+                            OutlinedButton(
+                                onClick = onPickSideDishGallery,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Gallery")
+                            }
+                            FilledTonalButton(
+                                onClick = onTrySampleSideDish,
+                                modifier = Modifier.weight(1.2f)
+                            ) {
+                                Text("Sample Side")
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // METHOD A & B: SEARCH / ENTER FOOD MANUALLY & SELECT FROM DATABASE
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
@@ -1849,7 +2367,7 @@ private fun InlineAddFoodContent(
             shape = RoundedCornerShape(12.dp)
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
             text = "Verified Nutrition Database Options",
@@ -1857,7 +2375,7 @@ private fun InlineAddFoodContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         LazyColumn(
             modifier = Modifier
@@ -2261,6 +2779,8 @@ private fun ApiKeySettingsDialog(
     isConfigured: Boolean,
     isTesting: Boolean,
     isStartup: Boolean,
+    validationThreshold: Double = 0.65,
+    onThresholdChanged: (Double) -> Unit = {},
     onSaveKey: (String, (Boolean, String) -> Unit) -> Unit,
     onClearKey: () -> Unit,
     onDismiss: () -> Unit
@@ -2278,7 +2798,7 @@ private fun ApiKeySettingsDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(if (isStartup) "Welcome to Food Calorie AI" else "Google AI Studio API Key")
+                Text(if (isStartup) "Welcome to Food Calorie AI" else "Settings & AI Configuration")
             }
         },
         text = {
@@ -2330,6 +2850,40 @@ private fun ApiKeySettingsDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                // Configurable Food Validation Gate Threshold
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Food Validation Threshold",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${(validationThreshold * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "Confidence required to accept food and compute calories. Lower values allow more ambiguous photos.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = validationThreshold.toFloat(),
+                        onValueChange = { onThresholdChanged(it.toDouble()) },
+                        valueRange = 0.40f..0.85f,
+                        steps = 8
+                    )
+                }
+
                 if (statusText != null) {
                     Text(
                         text = statusText!!,
@@ -2367,7 +2921,101 @@ private fun ApiKeySettingsDialog(
 }
 
 // ==========================================
-// 11. EMPTY OR INITIAL STATE VIEW
+// 11. FULL SCREEN IMAGE VIEWER DIALOG
+// ==========================================
+
+@Composable
+private fun FullScreenImageViewerDialog(
+    bitmap: Bitmap?,
+    resId: Int?,
+    title: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.95f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(top = 16.dp)
+            ) {
+                // Top Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Full resolution inspection",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("close_fullscreen_image_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close full size image",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                // High resolution uncropped image container
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Full-size food photo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                    } else if (resId != null) {
+                        Image(
+                            painter = painterResource(id = resId),
+                            contentDescription = "Full-size food photo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// 12. EMPTY OR INITIAL STATE VIEW
 // ==========================================
 
 @Composable
@@ -2394,6 +3042,97 @@ private fun EmptyOrLoadingView(
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center
                     )
+                }
+            }
+            is AnalysisUiState.ValidationFailed -> {
+                // Strict Food Validation Gate Rejection / Ambiguous Card (Requirements 1 & 2)
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (analysisState.isAmbiguous) Color(0xFFFFFBEB) else Color(0xFFFEF2F2)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.5.dp,
+                        if (analysisState.isAmbiguous) Color(0xFFFDE68A) else Color(0xFFFECACA)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (analysisState.isAmbiguous) Color(0xFFFEF3C7) else Color(0xFFFEE2E2),
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (analysisState.isAmbiguous) Icons.Default.Search else Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = if (analysisState.isAmbiguous) Color(0xFFD97706) else Color(0xFFDC2626),
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = if (analysisState.isAmbiguous) "Couldn't confidently identify the food."
+                            else "Food Validation Gate",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (analysisState.isAmbiguous) Color(0xFF92400E) else Color(0xFF991B1B),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = analysisState.message,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+
+                        // Disclaimer badge (Mandatory Requirement 1)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = analysisState.disclaimer,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = onPickImage,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Choose Photo")
+                            }
+                            OutlinedButton(
+                                onClick = onUseCamera,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Camera")
+                            }
+                        }
+                    }
                 }
             }
             is AnalysisUiState.Error -> {

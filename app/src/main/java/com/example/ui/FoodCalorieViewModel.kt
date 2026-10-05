@@ -10,9 +10,12 @@ import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.auth.ApiKeyRepository
 import com.example.data.gemini.GeminiFoodService
+import com.example.data.model.AmbiguousFoodException
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
+import com.example.data.model.FoodDetectionSource
 import com.example.data.model.MealAnalysisResult
+import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
 import kotlinx.coroutines.delay
@@ -28,6 +31,11 @@ sealed interface AnalysisUiState {
     data class Analyzing(val stepMessage: String) : AnalysisUiState
     data class Success(val result: MealAnalysisResult) : AnalysisUiState
     data class Error(val message: String) : AnalysisUiState
+    data class ValidationFailed(
+        val message: String,
+        val isAmbiguous: Boolean,
+        val disclaimer: String = "Food analysis is an estimate and should not be treated as medical or dietary advice."
+    ) : AnalysisUiState
 }
 
 data class SampleFoodPreset(
@@ -52,6 +60,14 @@ data class FoodCalorieUiState(
     val showApiKeyDialog: Boolean = false,
     val isStartupPrompt: Boolean = false,
     val isTestingApiKey: Boolean = false,
+    // Food Validation Gate configurable threshold
+    val validationThreshold: Double = 0.65,
+    // Full screen image inspection viewer
+    val showFullScreenImageViewer: Boolean = false,
+    // Additional Food Image / Side Dish detection state
+    val isAnalyzingSideDish: Boolean = false,
+    val pendingSideDishItems: List<DetectedFoodItem>? = null,
+    val sideDishError: String? = null,
     // Sheet & Dialog Visibility (Progressive Disclosure)
     val showAdjustMealSheet: Boolean = false,
     val adjustSheetInAddMode: Boolean = false,
@@ -289,16 +305,16 @@ class FoodCalorieViewModel(
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
             val hasKey = effectiveKey.isNotEmpty()
 
-            val step1 = if (hasKey) "Step 1/4: Gemini 3.8 Flash Vision identifying foods..."
-            else "Step 1/4: Vision Engine identifying foods (Demo Mode)..."
+            val step1 = if (hasKey) "Step 1/4: Food Validation Gate checking edible content..."
+            else "Step 1/4: Food Validation Gate (Demo Mode)..."
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing(step1))
             }
-            delay(350)
+            delay(300)
 
             _uiState.update {
-                it.copy(analysisState = AnalysisUiState.Analyzing("Step 2/4: Estimating portions using plate and vessel geometry..."))
+                it.copy(analysisState = AnalysisUiState.Analyzing("Step 2/4: Identifying distinct foods & geometry..."))
             }
             delay(300)
 
@@ -309,7 +325,8 @@ class FoodCalorieViewModel(
             val result = geminiService.analyzeFoodImage(
                 bitmap = bitmap,
                 sampleContextHint = hint,
-                providedApiKey = effectiveKey
+                providedApiKey = effectiveKey,
+                validationThreshold = _uiState.value.validationThreshold
             )
 
             result.onSuccess { mealResult ->
@@ -324,13 +341,41 @@ class FoodCalorieViewModel(
                 // Step 4: Generate concise AI nutrition insights from the meal
                 refreshInsights(mealResult)
             }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        analysisState = AnalysisUiState.Error(error.message ?: "Failed to analyze food image.")
-                    )
-                }
-                if (!hasKey) {
-                    openApiKeyDialog(isStartup = true)
+                when (error) {
+                    is NonFoodException -> {
+                        _uiState.update {
+                            it.copy(
+                                activeMealResult = null,
+                                analysisState = AnalysisUiState.ValidationFailed(
+                                    message = error.message,
+                                    isAmbiguous = false,
+                                    disclaimer = error.disclaimer
+                                )
+                            )
+                        }
+                    }
+                    is AmbiguousFoodException -> {
+                        _uiState.update {
+                            it.copy(
+                                activeMealResult = null,
+                                analysisState = AnalysisUiState.ValidationFailed(
+                                    message = error.message,
+                                    isAmbiguous = true,
+                                    disclaimer = error.disclaimer
+                                )
+                            )
+                        }
+                    }
+                    else -> {
+                        _uiState.update {
+                            it.copy(
+                                analysisState = AnalysisUiState.Error(error.message ?: "Failed to analyze food image.")
+                            )
+                        }
+                        if (!hasKey) {
+                            openApiKeyDialog(isStartup = true)
+                        }
+                    }
                 }
             }
         }
@@ -575,7 +620,10 @@ class FoodCalorieViewModel(
             cookingMethod = "Standard serving",
             confidence = 1.0,
             visualCues = "User added item",
-            nutritionReference = resolvedNutrition
+            nutritionReference = resolvedNutrition,
+            source = FoodDetectionSource.MANUAL_SEARCH,
+            assumptions = "Manual portion input by user.",
+            nutritionDataSource = resolvedNutrition.source
         )
 
         val updatedFoods = currentMeal.foods + newItem
@@ -590,6 +638,167 @@ class FoodCalorieViewModel(
         }
         // Recalculate insights dynamically
         refreshInsights(updatedMeal)
+    }
+
+    /**
+     * Analyzes an additional food/side dish photo (e.g. raita, pickle, papad).
+     * Runs through the Food Validation Gate before generating detected food options.
+     */
+    fun analyzeSideDishImage(bitmap: Bitmap) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isAnalyzingSideDish = true,
+                    sideDishError = null,
+                    pendingSideDishItems = null
+                )
+            }
+
+            val effectiveKey = apiKeyRepository.getEffectiveApiKey()
+            val result = geminiService.analyzeAdditionalFoodImage(
+                bitmap = bitmap,
+                providedApiKey = effectiveKey,
+                validationThreshold = _uiState.value.validationThreshold
+            )
+
+            result.onSuccess { items ->
+                if (items.isEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            isAnalyzingSideDish = false,
+                            sideDishError = "No food recognized in this image. Please upload a clear photo of your side dish."
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isAnalyzingSideDish = false,
+                            pendingSideDishItems = items,
+                            sideDishError = null
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                val errorMsg = when (error) {
+                    is NonFoodException -> error.message
+                    is AmbiguousFoodException -> error.message
+                    else -> error.message ?: "Could not recognize food in this image."
+                }
+                _uiState.update {
+                    it.copy(
+                        isAnalyzingSideDish = false,
+                        sideDishError = errorMsg
+                    )
+                }
+            }
+        }
+    }
+
+    fun onSideDishImageSelectedFromUri(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val bitmap = BitmapFactory.decodeStream(stream)
+                    if (bitmap != null) {
+                        analyzeSideDishImage(bitmap)
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(sideDishError = "Failed to load side dish image: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun onSideDishCameraCaptured(bitmap: Bitmap) {
+        analyzeSideDishImage(bitmap)
+    }
+
+    fun updatePendingSideDishName(index: Int, newName: String) {
+        val currentPending = _uiState.value.pendingSideDishItems ?: return
+        if (index in currentPending.indices) {
+            val item = currentPending[index]
+            val resolved = NutritionDatabase.resolveNutrition(newName)
+            val updated = currentPending.toMutableList()
+            updated[index] = item.copy(
+                name = newName,
+                nutritionReference = resolved,
+                nutritionDataSource = resolved.source
+            )
+            _uiState.update { it.copy(pendingSideDishItems = updated) }
+        }
+    }
+
+    fun updatePendingSideDishWeight(index: Int, newWeight: Double) {
+        val currentPending = _uiState.value.pendingSideDishItems ?: return
+        if (index in currentPending.indices) {
+            val item = currentPending[index]
+            val clamped = newWeight.coerceIn(5.0, 1000.0)
+            val updated = currentPending.toMutableList()
+            updated[index] = item.copy(
+                weightGrams = clamped,
+                quantityDescription = "${clamped.roundToInt()} g"
+            )
+            _uiState.update { it.copy(pendingSideDishItems = updated) }
+        }
+    }
+
+    fun removePendingSideDishItem(index: Int) {
+        val currentPending = _uiState.value.pendingSideDishItems ?: return
+        if (index in currentPending.indices) {
+            val updated = currentPending.toMutableList()
+            updated.removeAt(index)
+            _uiState.update {
+                it.copy(
+                    pendingSideDishItems = if (updated.isEmpty()) null else updated
+                )
+            }
+        }
+    }
+
+    /**
+     * Confirms and integrates all verified side dish items into the single meal state of truth.
+     */
+    fun confirmAddPendingSideDishes() {
+        val pending = _uiState.value.pendingSideDishItems ?: return
+        val currentMeal = _uiState.value.activeMealResult ?: return
+
+        val updatedFoods = currentMeal.foods + pending
+        val updatedMeal = currentMeal.copy(foods = updatedFoods)
+
+        _uiState.update {
+            it.copy(
+                activeMealResult = updatedMeal,
+                analysisState = AnalysisUiState.Success(updatedMeal),
+                pendingSideDishItems = null,
+                sideDishError = null,
+                adjustSheetInAddMode = false,
+                feedbackBanner = "Added ${pending.size} item(s) from image. Recalculated!"
+            )
+        }
+        refreshInsights(updatedMeal)
+    }
+
+    fun cancelPendingSideDishes() {
+        _uiState.update {
+            it.copy(
+                pendingSideDishItems = null,
+                sideDishError = null
+            )
+        }
+    }
+
+    fun setValidationThreshold(threshold: Double) {
+        _uiState.update { it.copy(validationThreshold = threshold.coerceIn(0.1, 0.95)) }
+    }
+
+    fun openFullScreenImageViewer() {
+        _uiState.update { it.copy(showFullScreenImageViewer = true) }
+    }
+
+    fun closeFullScreenImageViewer() {
+        _uiState.update { it.copy(showFullScreenImageViewer = false) }
     }
 
     /**
