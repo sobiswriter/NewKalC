@@ -16,6 +16,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -79,6 +80,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -87,12 +89,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -128,6 +132,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -393,6 +400,13 @@ fun FoodCalorieScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
                 ) {
+                    val analysisState = uiState.analysisState
+                    if (analysisState is AnalysisUiState.Analyzing) {
+                        item(key = "live_analysis_progress") {
+                            LiveAnalysisProgressBanner(analyzingState = analysisState)
+                        }
+                    }
+
                     // 1. Food Analysis Header (Hero Summary)
                     item(key = "header") {
                         CollapsibleMealHeader(
@@ -945,27 +959,29 @@ private fun CollapsibleMealHeader(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "${total.calories}",
+                            text = if (total.calories > 0) "${total.calories}" else "Estimating...",
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontWeight = FontWeight.Black,
                                 color = ColorCalories
                             )
                         )
-                        Text(
-                            text = "kcal",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = ColorCalories
-                            ),
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Text(
-                            text = "· estimated",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            modifier = Modifier.padding(bottom = 5.dp)
-                        )
+                        if (total.calories > 0) {
+                            Text(
+                                text = "kcal",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = ColorCalories
+                                ),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            Text(
+                                text = "· estimated",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier.padding(bottom = 5.dp)
+                            )
+                        }
                     }
 
                     // Confidence pill
@@ -2614,8 +2630,16 @@ private fun AskAiBottomSheet(
     onSendQuestion: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val chatListState = rememberLazyListState()
     val total = meal?.total
+
+    // Auto-scroll to latest message when messages change or while asking
+    LaunchedEffect(chatMessages.size, isAsking) {
+        if (chatMessages.isNotEmpty()) {
+            chatListState.animateScrollToItem(chatMessages.size - 1)
+        }
+    }
 
     val promptSuggestions = remember {
         listOf(
@@ -2630,16 +2654,17 @@ private fun AskAiBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        dragHandle = null,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .navigationBarsPadding()
                 .imePadding()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp)
         ) {
             // Header
             Row(
@@ -2690,6 +2715,10 @@ private fun AskAiBottomSheet(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        ),
                         modifier = Modifier.clickable { onSendQuestion(suggestion) }
                     ) {
                         Text(
@@ -2706,6 +2735,7 @@ private fun AskAiBottomSheet(
 
             // Chat Message List
             LazyColumn(
+                state = chatListState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -2739,39 +2769,73 @@ private fun AskAiBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Input Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // Prominent, Pinned Chat Input Bar (Always visible)
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedTextField(
-                    value = questionInput,
-                    onValueChange = onQuestionChange,
-                    placeholder = { Text("Ask about calories, macros, substitutions...") },
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .testTag("ask_ai_input_field"),
-                    shape = RoundedCornerShape(20.dp),
-                    maxLines = 3
-                )
-
-                IconButton(
-                    onClick = { onSendQuestion(questionInput) },
-                    enabled = questionInput.isNotBlank() && !isAsking,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            if (questionInput.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            CircleShape
-                        )
-                        .testTag("ask_ai_send_button")
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send question",
-                        tint = if (questionInput.isNotBlank()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                    OutlinedTextField(
+                        value = questionInput,
+                        onValueChange = onQuestionChange,
+                        placeholder = {
+                            Text(
+                                "Ask about calories, macros, portions...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("ask_ai_input_field"),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        ),
+                        maxLines = 3,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Send
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                if (questionInput.isNotBlank() && !isAsking) {
+                                    onSendQuestion(questionInput)
+                                }
+                            }
+                        )
                     )
+
+                    FilledIconButton(
+                        onClick = { onSendQuestion(questionInput) },
+                        enabled = questionInput.isNotBlank() && !isAsking,
+                        colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        ),
+                        modifier = Modifier
+                            .size(42.dp)
+                            .testTag("ask_ai_send_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send question",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }
@@ -3178,6 +3242,158 @@ private fun FullScreenImageViewerDialog(
     }
 }
 
+@Composable
+private fun LiveAnalysisProgressBanner(
+    analyzingState: AnalysisUiState.Analyzing
+) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "AI Pipeline · Step ${analyzingState.stepIndex} of ${analyzingState.totalSteps}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(6.dp)
+                        ) {}
+                        Text(
+                            text = "Live Stream",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = analyzingState.stepMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            val animatedProgress by animateFloatAsState(
+                targetValue = analyzingState.progress,
+                label = "analysis_progress"
+            )
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
+            // Step pills row: 1. Validated | 2. Foods | 3. Macros | 4. Insights
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                val stepNames = listOf("1. Validated", "2. Foods", "3. Macros", "4. Insights")
+                stepNames.forEachIndexed { idx, label ->
+                    val isPassed = analyzingState.stepIndex > idx + 1
+                    val isCurrent = analyzingState.stepIndex == idx + 1
+                    val color = when {
+                        isPassed -> MaterialTheme.colorScheme.primary
+                        isCurrent -> ColorCalories
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                    }
+                    Text(
+                        text = if (isPassed) "$label ✓" else label,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        fontWeight = if (isCurrent || isPassed) FontWeight.Bold else FontWeight.Normal,
+                        color = color
+                    )
+                }
+            }
+
+            if (analyzingState.detectedFoodNames.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Identified:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        analyzingState.detectedFoodNames.forEach { name ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                )
+                            ) {
+                                Text(
+                                    text = name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ==========================================
 // 12. EMPTY OR INITIAL STATE VIEW
 // ==========================================
@@ -3198,16 +3414,53 @@ private fun EmptyOrLoadingView(
     ) {
         when (analysisState) {
             is AnalysisUiState.Analyzing -> {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 480.dp)
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(48.dp))
-                    Text(
-                        text = analysisState.stepMessage,
-                        style = MaterialTheme.typography.bodyLarge,
-                        textAlign = TextAlign.Center
-                    )
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        if (imageBitmap != null || imageResId != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                if (imageBitmap != null) {
+                                    Image(
+                                        bitmap = imageBitmap.asImageBitmap(),
+                                        contentDescription = "Uploaded food being analyzed",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else if (imageResId != null) {
+                                    Image(
+                                        painter = painterResource(id = imageResId),
+                                        contentDescription = "Uploaded food being analyzed",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
+
+                        LiveAnalysisProgressBanner(analyzingState = analysisState)
+                    }
                 }
             }
             is AnalysisUiState.ValidationFailed -> {

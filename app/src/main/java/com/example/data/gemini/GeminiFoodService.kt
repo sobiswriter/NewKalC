@@ -29,25 +29,28 @@ import kotlin.math.roundToInt
 class GeminiFoodService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    // Primary model as requested: gemini-3.8-flash with fallback options
+    // Primary model as requested: gemini-3.8-flash with ultra-fast fallbacks
     private val candidateModels = listOf(
         "gemini-3.8-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
         "gemini-flash-latest",
         "gemini-3.1-flash-lite-preview"
     )
 
     /**
-     * Converts Bitmap to Base64 JPEG string, resizing if too large to ensure fast network payload.
+     * Converts Bitmap to Base64 JPEG string, resizing to optimal resolution for high-speed upload.
      */
     private fun bitmapToBase64(bitmap: Bitmap): String {
-        val maxDimension = 1024
+        val maxDimension = 720
         val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
             val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
             val newWidth: Int
@@ -65,7 +68,7 @@ class GeminiFoodService {
         }
 
         val outputStream = ByteArrayOutputStream()
-        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+        scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 75, outputStream)
         return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
@@ -135,9 +138,11 @@ class GeminiFoodService {
         bitmap: Bitmap,
         sampleContextHint: String? = null,
         providedApiKey: String? = null,
-        validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD
+        validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD,
+        onStageUpdate: (suspend (stepIndex: Int, message: String, provisionalFoods: List<String>) -> Unit)? = null
     ): Result<MealAnalysisResult> = withContext(Dispatchers.IO) {
         // MANDATORY FOOD VALIDATION GATE (Step 1)
+        onStageUpdate?.invoke(1, "Step 1/4: Food Validation Gate checking edible content...", emptyList())
         val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
         if (preValidation is ValidationOutcome.Rejected) {
             return@withContext Result.failure(NonFoodException(preValidation.message))
@@ -155,8 +160,13 @@ class GeminiFoodService {
         if (!isRealKey) {
             Log.w("GeminiFoodService", "No custom GEMINI_API_KEY provided; using deterministic vision fallback.")
             val fallbackMeal = getDeterministicFallbackAnalysis(sampleContextHint)
+            val fallbackNames = fallbackMeal.foods.map { it.name }
+            onStageUpdate?.invoke(2, "Step 2/4: Identified ${fallbackNames.size} distinct items...", fallbackNames)
+            onStageUpdate?.invoke(3, "Step 3/4: Resolving macros from Nutrition Database...", fallbackNames)
             return@withContext Result.success(fallbackMeal)
         }
+
+        onStageUpdate?.invoke(2, "Step 2/4: Gemini 3.8 Flash identifying foods on plate...", emptyList())
 
         try {
             val base64Image = bitmapToBase64(bitmap)
@@ -234,7 +244,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 })
                 put("generationConfig", JSONObject().apply {
                     put("responseMimeType", "application/json")
-                    put("temperature", 0.2)
+                    put("temperature", 0.1)
+                    put("maxOutputTokens", 1024)
                 })
             }
 
@@ -255,6 +266,14 @@ Respond strictly with valid JSON without markdown fences matching this schema:
 
                     if (response.isSuccessful && responseBody != null) {
                         Log.d("GeminiFoodService", "Successfully analyzed with model $modelName")
+                        val provisionalNames = extractFoodNames(responseBody)
+                        if (provisionalNames.isNotEmpty()) {
+                            onStageUpdate?.invoke(
+                                3,
+                                "Step 3/4: Resolving macros for ${provisionalNames.size} detected items...",
+                                provisionalNames
+                            )
+                        }
                         val parsedMeal = parseGeminiResponse(
                             responseJsonString = responseBody,
                             validationThreshold = validationThreshold,
@@ -490,6 +509,35 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                     )
                 )
             }
+        }
+    }
+
+    /**
+     * Quickly extracts detected food names from the raw Gemini response JSON for early progressive UI disclosure.
+     */
+    fun extractFoodNames(responseJsonString: String): List<String> {
+        return try {
+            val root = JSONObject(responseJsonString)
+            val candidate = root.optJSONArray("candidates")?.optJSONObject(0)
+            val text = candidate?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "{}"
+            val cleanJson = text.trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+            val parsedObj = JSONObject(cleanJson)
+            val foodsArray = parsedObj.optJSONArray("detected_foods") ?: JSONArray()
+            val names = mutableListOf<String>()
+            for (i in 0 until foodsArray.length()) {
+                val item = foodsArray.getJSONObject(i)
+                val name = item.optString("name", "").trim()
+                if (name.isNotEmpty()) {
+                    names.add(name)
+                }
+            }
+            names
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

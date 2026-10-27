@@ -18,6 +18,8 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
+import com.example.data.validation.FoodImageValidator
+import com.example.data.validation.ValidationOutcome
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +30,13 @@ import kotlin.math.roundToInt
 
 sealed interface AnalysisUiState {
     object Idle : AnalysisUiState
-    data class Analyzing(val stepMessage: String) : AnalysisUiState
+    data class Analyzing(
+        val stepMessage: String,
+        val stepIndex: Int = 1,
+        val totalSteps: Int = 4,
+        val progress: Float = 0.25f,
+        val detectedFoodNames: List<String> = emptyList()
+    ) : AnalysisUiState
     data class Success(val result: MealAnalysisResult) : AnalysisUiState
     data class Error(val message: String) : AnalysisUiState
     data class ValidationFailed(
@@ -264,8 +272,12 @@ class FoodCalorieViewModel(
                                 currentImageBitmap = bitmap,
                                 currentImageResId = null,
                                 currentImageTitle = "Uploaded Custom Food Photo",
-                                activeMealResult = null, // Mandatory: clear previous meal totals before validation
-                                analysisState = AnalysisUiState.Analyzing("Food Validation Gate: Inspecting edible content...")
+                                analysisState = AnalysisUiState.Analyzing(
+                                    stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
+                                    stepIndex = 1,
+                                    totalSteps = 4,
+                                    progress = 0.25f
+                                )
                             )
                         }
                         analyzeImage(bitmap = bitmap, hint = null)
@@ -292,8 +304,12 @@ class FoodCalorieViewModel(
                 currentImageBitmap = bitmap,
                 currentImageResId = null,
                 currentImageTitle = "Camera Capture",
-                activeMealResult = null, // Mandatory: clear previous meal totals before validation
-                analysisState = AnalysisUiState.Analyzing("Food Validation Gate: Inspecting edible content...")
+                analysisState = AnalysisUiState.Analyzing(
+                    stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
+                    stepIndex = 1,
+                    totalSteps = 4,
+                    progress = 0.25f
+                )
             )
         }
         analyzeImage(bitmap = bitmap, hint = null)
@@ -304,33 +320,123 @@ class FoodCalorieViewModel(
             if (bitmap == null) return@launch
 
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
-            val hasKey = effectiveKey.isNotEmpty()
 
-            val step1 = if (hasKey) "Step 1/4: Food Validation Gate checking edible content..."
-            else "Step 1/4: Food Validation Gate (Demo Mode)..."
+            // Pre-validation gate check (instant local heuristic)
+            val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
+            if (preValidation is ValidationOutcome.Rejected) {
+                _uiState.update {
+                    it.copy(
+                        activeMealResult = null,
+                        analysisState = AnalysisUiState.ValidationFailed(
+                            message = preValidation.message,
+                            isAmbiguous = false,
+                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
+                        )
+                    )
+                }
+                return@launch
+            }
+            if (preValidation is ValidationOutcome.Ambiguous) {
+                _uiState.update {
+                    it.copy(
+                        activeMealResult = null,
+                        analysisState = AnalysisUiState.ValidationFailed(
+                            message = preValidation.message,
+                            isAmbiguous = true,
+                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
+                        )
+                    )
+                }
+                return@launch
+            }
 
+            // Step 1: Food Validation Gate Passed
             _uiState.update {
                 it.copy(
-                    activeMealResult = null,
-                    analysisState = AnalysisUiState.Analyzing(step1)
+                    analysisState = AnalysisUiState.Analyzing(
+                        stepMessage = "Step 1/4: Food Validation Passed ✓ (Edible food confirmed)",
+                        stepIndex = 1,
+                        totalSteps = 4,
+                        progress = 0.25f
+                    )
                 )
             }
-            delay(250)
 
-            _uiState.update {
-                it.copy(analysisState = AnalysisUiState.Analyzing("Step 2/4: Identifying distinct foods & geometry..."))
-            }
-            delay(250)
-
-            _uiState.update {
-                it.copy(analysisState = AnalysisUiState.Analyzing("Step 3/4: Resolving macros from Nutrition Database..."))
+            // If sample preset hint is available, provide provisional foods immediately so user has zero wait time
+            if (!hint.isNullOrBlank()) {
+                val provisionalMeal = geminiService.getDeterministicFallbackAnalysis(hint)
+                _uiState.update {
+                    it.copy(
+                        activeMealResult = provisionalMeal,
+                        originalFoodNames = provisionalMeal.foods.map { f -> f.name },
+                        analysisState = AnalysisUiState.Analyzing(
+                            stepMessage = "Step 2/4: Identified ${provisionalMeal.foods.size} items on plate...",
+                            stepIndex = 2,
+                            totalSteps = 4,
+                            progress = 0.50f,
+                            detectedFoodNames = provisionalMeal.foods.map { f -> f.name }
+                        )
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        analysisState = AnalysisUiState.Analyzing(
+                            stepMessage = "Step 2/4: Gemini 3.8 Flash identifying foods on plate...",
+                            stepIndex = 2,
+                            totalSteps = 4,
+                            progress = 0.45f
+                        )
+                    )
+                }
             }
 
             val result = geminiService.analyzeFoodImage(
                 bitmap = bitmap,
                 sampleContextHint = hint,
                 providedApiKey = effectiveKey,
-                validationThreshold = _uiState.value.validationThreshold
+                validationThreshold = _uiState.value.validationThreshold,
+                onStageUpdate = { stepIdx, msg, foodNames ->
+                    _uiState.update { current ->
+                        val prog = when (stepIdx) {
+                            1 -> 0.25f
+                            2 -> 0.50f
+                            3 -> 0.75f
+                            else -> 0.90f
+                        }
+                        val provisionalMeal = if (foodNames.isNotEmpty() && (current.activeMealResult == null || current.activeMealResult.foods.isEmpty())) {
+                            val items = foodNames.map { name ->
+                                val ref = NutritionDatabase.resolveNutrition(name)
+                                DetectedFoodItem(
+                                    name = name,
+                                    quantityDescription = "Estimating portion...",
+                                    weightGrams = 120.0,
+                                    cookingMethod = "Cooked",
+                                    confidence = 0.85,
+                                    visualCues = "Scale & dish boundaries",
+                                    nutritionReference = ref,
+                                    source = FoodDetectionSource.ORIGINAL_IMAGE
+                                )
+                            }
+                            MealAnalysisResult(
+                                foods = items,
+                                overallConfidence = 0.82,
+                                uncertaintyExplanation = "AI is resolving final nutrition from database..."
+                            )
+                        } else current.activeMealResult
+
+                        current.copy(
+                            activeMealResult = provisionalMeal,
+                            analysisState = AnalysisUiState.Analyzing(
+                                stepMessage = msg,
+                                stepIndex = stepIdx,
+                                totalSteps = 4,
+                                progress = prog,
+                                detectedFoodNames = if (foodNames.isNotEmpty()) foodNames else current.activeMealResult?.foods?.map { f -> f.name } ?: emptyList()
+                            )
+                        )
+                    }
+                }
             )
 
             result.onSuccess { mealResult ->
@@ -338,12 +444,21 @@ class FoodCalorieViewModel(
                     it.copy(
                         activeMealResult = mealResult,
                         originalFoodNames = mealResult.foods.map { food -> food.name },
-                        analysisState = AnalysisUiState.Success(mealResult),
+                        analysisState = AnalysisUiState.Analyzing(
+                            stepMessage = "Step 4/4: Generating AI Nutrition Insights...",
+                            stepIndex = 4,
+                            totalSteps = 4,
+                            progress = 0.95f,
+                            detectedFoodNames = mealResult.foods.map { f -> f.name }
+                        ),
                         feedbackBanner = "Analysis complete! ${mealResult.foods.size} food items resolved."
                     )
                 }
                 // Step 4: Generate concise AI nutrition insights from the meal
                 refreshInsights(mealResult)
+                _uiState.update {
+                    it.copy(analysisState = AnalysisUiState.Success(mealResult))
+                }
             }.onFailure { error ->
                 when (error) {
                     is NonFoodException -> {
