@@ -1148,66 +1148,97 @@ private fun CompactFoodItemRow(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = food.name,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    // Source Badge
+                    // Source Icon Badge ('P' for original photo, '+' for added photo, 'M' for manual search)
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = CircleShape,
                         color = when (food.source) {
                             FoodDetectionSource.ORIGINAL_IMAGE -> Color(0xFFEFF6FF)
                             FoodDetectionSource.IMAGE_ADDITION -> Color(0xFFF3E8FF)
                             FoodDetectionSource.MANUAL_SEARCH -> Color(0xFFFEF3C7)
-                        }
+                        },
+                        modifier = Modifier.size(20.dp)
                     ) {
-                        Text(
-                            text = when (food.source) {
-                                FoodDetectionSource.ORIGINAL_IMAGE -> "Photo"
-                                FoodDetectionSource.IMAGE_ADDITION -> "Added Image"
-                                FoodDetectionSource.MANUAL_SEARCH -> "Manual"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = when (food.source) {
-                                FoodDetectionSource.ORIGINAL_IMAGE -> Color(0xFF1D4ED8)
-                                FoodDetectionSource.IMAGE_ADDITION -> Color(0xFF7E22CE)
-                                FoodDetectionSource.MANUAL_SEARCH -> Color(0xFFB45309)
-                            },
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = when (food.source) {
+                                    FoodDetectionSource.ORIGINAL_IMAGE -> "P"
+                                    FoodDetectionSource.IMAGE_ADDITION -> "+"
+                                    FoodDetectionSource.MANUAL_SEARCH -> "M"
+                                },
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                ),
+                                color = when (food.source) {
+                                    FoodDetectionSource.ORIGINAL_IMAGE -> Color(0xFF1D4ED8)
+                                    FoodDetectionSource.IMAGE_ADDITION -> Color(0xFF7E22CE)
+                                    FoodDetectionSource.MANUAL_SEARCH -> Color(0xFFB45309)
+                                }
+                            )
+                        }
                     }
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp)
                 ) {
                     Text(
                         text = "${food.weightGrams.roundToInt()} g · ${food.quantityDescription}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Text(
-                        text = if (isExpanded) "· Hide details" else "· View details",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    // 'i' info icon for progressive disclosure
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isExpanded) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { onToggle() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "i",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp
+                                ),
+                                color = if (isExpanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
+            Spacer(modifier = Modifier.width(8.dp))
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = "${food.calories} kcal",
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    color = ColorCalories
+                    color = ColorCalories,
+                    maxLines = 1
                 )
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -1269,6 +1300,16 @@ private fun CompactFoodItemRow(
                         text = "Assumptions: ${food.assumptions}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Source: ${when (food.source) {
+                            FoodDetectionSource.ORIGINAL_IMAGE -> "Original Meal Photo (P)"
+                            FoodDetectionSource.IMAGE_ADDITION -> "Added Food Photo (+)"
+                            FoodDetectionSource.MANUAL_SEARCH -> "Manual Database Search (M)"
+                        }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "Nutrition database: ${food.nutritionDataSource}",
