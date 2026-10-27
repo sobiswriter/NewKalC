@@ -117,6 +117,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -811,28 +812,29 @@ private fun CollapsibleMealHeader(
                 .padding(16.dp)
         ) {
             if (!isCollapsed) {
-                // EXPANDED STATE: Large, high-clarity responsive image display (preserves aspect ratio, rounded corners)
+                // EXPANDED STATE: Large, high-clarity responsive image display with appetizing crop & gradient
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF0F172A))
+                        .height(230.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                         .clickable { onImageClick() }
                         .testTag("meal_image_expanded_box")
                 ) {
+                    // Appetizing food photography view using ContentScale.Crop
                     if (imageBitmap != null) {
                         Image(
                             bitmap = imageBitmap.asImageBitmap(),
                             contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Fit,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (imageResId != null) {
                         Image(
                             painter = painterResource(id = imageResId),
                             contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Fit,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -846,18 +848,60 @@ private fun CollapsibleMealHeader(
                         )
                     }
 
+                    // Subtle bottom gradient vignette for contrast with the tap action badge
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))
+                                )
+                            )
+                    )
+
+                    // Top Left: AI Vision Verified Tag
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color.Black.copy(alpha = 0.65f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF10B981),
+                                modifier = Modifier.size(7.dp)
+                            ) {}
+                            Text(
+                                text = "AI Vision Verified",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
                     // Floating Pill: Tap to view full screen
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(20.dp),
                         color = Color.Black.copy(alpha = 0.65f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(10.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ZoomIn,
@@ -866,8 +910,8 @@ private fun CollapsibleMealHeader(
                                 modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = "Tap to inspect full screen",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "Tap to inspect photo",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                 color = Color.White,
                                 fontWeight = FontWeight.Medium
                             )
@@ -875,34 +919,56 @@ private fun CollapsibleMealHeader(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Meal Title & Total Calories Row
+                // Meal Title
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Estimated Calories & Confidence Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "Estimated ${total.calories} kcal",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.ExtraBold,
+                            text = "${total.calories}",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontWeight = FontWeight.Black,
                                 color = ColorCalories
                             )
+                        )
+                        Text(
+                            text = "kcal",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = ColorCalories
+                            ),
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Text(
+                            text = "· estimated",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                            modifier = Modifier.padding(bottom = 5.dp)
                         )
                     }
 
                     // Confidence pill
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = when {
                             confidencePct >= 80 -> Color(0xFFDCFCE7)
                             confidencePct >= 65 -> Color(0xFFFEF3C7)
@@ -910,9 +976,9 @@ private fun CollapsibleMealHeader(
                         }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Surface(
                                 shape = CircleShape,
@@ -924,9 +990,9 @@ private fun CollapsibleMealHeader(
                                 modifier = Modifier.size(6.dp)
                             ) {}
                             Text(
-                                text = "$confidencePct% Confidence (±12% variance)",
+                                text = "$confidencePct% Confidence",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 color = when {
                                     confidencePct >= 80 -> Color(0xFF166534)
                                     confidencePct >= 65 -> Color(0xFF92400E)
@@ -940,6 +1006,11 @@ private fun CollapsibleMealHeader(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Full Macro Split Badges (Protein, Carbs, Fat)
+                val totalMacroGrams = (total.protein + total.carbs + total.fat).coerceAtLeast(1.0)
+                val proteinPct = ((total.protein / totalMacroGrams) * 100).roundToInt()
+                val carbsPct = ((total.carbs / totalMacroGrams) * 100).roundToInt()
+                val fatPct = (100 - proteinPct - carbsPct).coerceAtLeast(0)
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -947,34 +1018,57 @@ private fun CollapsibleMealHeader(
                     MacroPill(
                         label = "Protein",
                         amount = "${total.protein}g",
+                        pct = proteinPct,
                         color = ColorProtein,
                         modifier = Modifier.weight(1f)
                     )
                     MacroPill(
                         label = "Carbs",
                         amount = "${total.carbs}g",
+                        pct = carbsPct,
                         color = ColorCarbs,
                         modifier = Modifier.weight(1f)
                     )
                     MacroPill(
                         label = "Fat",
                         amount = "${total.fat}g",
+                        pct = fatPct,
                         color = ColorFat,
                         modifier = Modifier.weight(1f)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Visual uncertainty note
                 if (meal.uncertaintyExplanation.isNotBlank()) {
-                    Text(
-                        text = meal.uncertaintyExplanation,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = meal.uncertaintyExplanation,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             } else {
                 // COLLAPSED STATE: Compact single-row representation
@@ -1021,30 +1115,44 @@ private fun CollapsibleMealHeader(
 private fun MacroPill(
     label: String,
     amount: String,
+    pct: Int,
     color: Color,
     modifier: Modifier = Modifier
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = color.copy(alpha = 0.12f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.25f))
+        shape = RoundedCornerShape(14.dp),
+        color = color.copy(alpha = 0.08f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.22f))
     ) {
         Column(
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp),
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = amount,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
                 color = color
             )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "($pct%)",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = color,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
