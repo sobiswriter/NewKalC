@@ -264,19 +264,19 @@ class FoodCalorieViewModel(
                                 currentImageBitmap = bitmap,
                                 currentImageResId = null,
                                 currentImageTitle = "Uploaded Custom Food Photo",
-                                analysisState = AnalysisUiState.Idle
+                                activeMealResult = null, // Mandatory: clear previous meal totals before validation
+                                analysisState = AnalysisUiState.Analyzing("Food Validation Gate: Inspecting edible content...")
                             )
                         }
-                        if (!apiKeyRepository.hasValidApiKey()) {
-                            openApiKeyDialog(isStartup = true)
-                        } else {
-                            analyzeImage(bitmap = bitmap, hint = null)
-                        }
+                        analyzeImage(bitmap = bitmap, hint = null)
                     }
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(analysisState = AnalysisUiState.Error("Failed to load image: ${e.message}"))
+                    it.copy(
+                        activeMealResult = null,
+                        analysisState = AnalysisUiState.Error("Something went wrong while analyzing this image. Please try again.")
+                    )
                 }
             }
         }
@@ -288,14 +288,11 @@ class FoodCalorieViewModel(
                 currentImageBitmap = bitmap,
                 currentImageResId = null,
                 currentImageTitle = "Camera Capture",
-                analysisState = AnalysisUiState.Idle
+                activeMealResult = null, // Mandatory: clear previous meal totals before validation
+                analysisState = AnalysisUiState.Analyzing("Food Validation Gate: Inspecting edible content...")
             )
         }
-        if (!apiKeyRepository.hasValidApiKey()) {
-            openApiKeyDialog(isStartup = true)
-        } else {
-            analyzeImage(bitmap = bitmap, hint = null)
-        }
+        analyzeImage(bitmap = bitmap, hint = null)
     }
 
     fun analyzeImage(bitmap: Bitmap?, hint: String? = null) {
@@ -309,14 +306,17 @@ class FoodCalorieViewModel(
             else "Step 1/4: Food Validation Gate (Demo Mode)..."
 
             _uiState.update {
-                it.copy(analysisState = AnalysisUiState.Analyzing(step1))
+                it.copy(
+                    activeMealResult = null,
+                    analysisState = AnalysisUiState.Analyzing(step1)
+                )
             }
-            delay(300)
+            delay(250)
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing("Step 2/4: Identifying distinct foods & geometry..."))
             }
-            delay(300)
+            delay(250)
 
             _uiState.update {
                 it.copy(analysisState = AnalysisUiState.Analyzing("Step 3/4: Resolving macros from Nutrition Database..."))
@@ -369,7 +369,8 @@ class FoodCalorieViewModel(
                     else -> {
                         _uiState.update {
                             it.copy(
-                                analysisState = AnalysisUiState.Error(error.message ?: "Failed to analyze food image.")
+                                activeMealResult = null,
+                                analysisState = AnalysisUiState.Error(error.message ?: "Something went wrong while analyzing this image. Please try again.")
                             )
                         }
                         if (!hasKey) {

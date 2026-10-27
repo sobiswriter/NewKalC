@@ -12,6 +12,8 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
+import com.example.data.validation.FoodImageValidator
+import com.example.data.validation.ValidationOutcome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -135,6 +137,15 @@ class GeminiFoodService {
         providedApiKey: String? = null,
         validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD
     ): Result<MealAnalysisResult> = withContext(Dispatchers.IO) {
+        // MANDATORY FOOD VALIDATION GATE (Step 1)
+        val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
+        if (preValidation is ValidationOutcome.Rejected) {
+            return@withContext Result.failure(NonFoodException(preValidation.message))
+        }
+        if (preValidation is ValidationOutcome.Ambiguous) {
+            return@withContext Result.failure(AmbiguousFoodException(preValidation.message, preValidation.confidence))
+        }
+
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
 
@@ -291,6 +302,15 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         providedApiKey: String? = null,
         validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD
     ): Result<List<DetectedFoodItem>> = withContext(Dispatchers.IO) {
+        // MANDATORY FOOD VALIDATION GATE FOR SIDE DISH
+        val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
+        if (preValidation is ValidationOutcome.Rejected) {
+            return@withContext Result.failure(NonFoodException(preValidation.message))
+        }
+        if (preValidation is ValidationOutcome.Ambiguous) {
+            return@withContext Result.failure(AmbiguousFoodException(preValidation.message, preValidation.confidence))
+        }
+
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
         val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"

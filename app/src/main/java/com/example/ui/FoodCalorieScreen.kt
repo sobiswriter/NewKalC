@@ -440,6 +440,8 @@ fun FoodCalorieScreen(
                 // Empty / Loading state
                 EmptyOrLoadingView(
                     analysisState = uiState.analysisState,
+                    imageBitmap = uiState.currentImageBitmap,
+                    imageResId = uiState.currentImageResId,
                     onPickImage = {
                         galleryLauncher.launch(
                             androidx.activity.result.PickVisualMediaRequest(
@@ -813,9 +815,9 @@ private fun CollapsibleMealHeader(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
+                        .height(220.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .background(Color(0xFF0F172A))
                         .clickable { onImageClick() }
                         .testTag("meal_image_expanded_box")
                 ) {
@@ -823,14 +825,14 @@ private fun CollapsibleMealHeader(
                         Image(
                             bitmap = imageBitmap.asImageBitmap(),
                             contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (imageResId != null) {
                         Image(
                             painter = painterResource(id = imageResId),
                             contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Crop,
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -1179,11 +1181,22 @@ private fun CompactFoodItemRow(
                         )
                     }
                 }
-                Text(
-                    text = "${food.weightGrams.roundToInt()} g · ${food.quantityDescription}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "${food.weightGrams.roundToInt()} g · ${food.quantityDescription}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = if (isExpanded) "· Hide details" else "· View details",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             Row(
@@ -3021,6 +3034,8 @@ private fun FullScreenImageViewerDialog(
 @Composable
 private fun EmptyOrLoadingView(
     analysisState: AnalysisUiState,
+    imageBitmap: Bitmap? = null,
+    imageResId: Int? = null,
     onPickImage: () -> Unit,
     onUseCamera: () -> Unit
 ) {
@@ -3058,21 +3073,63 @@ private fun EmptyOrLoadingView(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        // Display the inspected image so user can clearly see what failed validation
+                        if (imageBitmap != null || imageResId != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(170.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFF0F172A))
+                            ) {
+                                if (imageBitmap != null) {
+                                    Image(
+                                        bitmap = imageBitmap.asImageBitmap(),
+                                        contentDescription = "Uploaded image undergoing validation",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else if (imageResId != null) {
+                                    Image(
+                                        painter = painterResource(id = imageResId),
+                                        contentDescription = "Uploaded image undergoing validation",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (analysisState.isAmbiguous) Color(0xFFD97706) else Color(0xFFDC2626),
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = if (analysisState.isAmbiguous) "Ambiguous / Low Confidence" else "Non-Food Image Rejected",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         Surface(
                             shape = CircleShape,
                             color = if (analysisState.isAmbiguous) Color(0xFFFEF3C7) else Color(0xFFFEE2E2),
-                            modifier = Modifier.size(56.dp)
+                            modifier = Modifier.size(52.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (analysisState.isAmbiguous) Icons.Default.Search else Icons.Default.Shield,
                                     contentDescription = null,
                                     tint = if (analysisState.isAmbiguous) Color(0xFFD97706) else Color(0xFFDC2626),
-                                    modifier = Modifier.size(30.dp)
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
@@ -3109,7 +3166,7 @@ private fun EmptyOrLoadingView(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3138,8 +3195,25 @@ private fun EmptyOrLoadingView(
             is AnalysisUiState.Error -> {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
+                    if (imageBitmap != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(170.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF0F172A))
+                        ) {
+                            Image(
+                                bitmap = imageBitmap.asImageBitmap(),
+                                contentDescription = "Uploaded image",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
                     Icon(
                         imageVector = Icons.Default.Warning,
                         contentDescription = null,
@@ -3152,13 +3226,20 @@ private fun EmptyOrLoadingView(
                         color = MaterialTheme.colorScheme.error,
                         textAlign = TextAlign.Center
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = onPickImage) { Text("Try Another Photo") }
-                        OutlinedButton(onClick = onUseCamera) { Text("Camera") }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(onClick = onPickImage, modifier = Modifier.weight(1f)) {
+                            Text("Choose Photo")
+                        }
+                        OutlinedButton(onClick = onUseCamera, modifier = Modifier.weight(1f)) {
+                            Text("Camera")
+                        }
                     }
                 }
             }
-            else -> {
+            is AnalysisUiState.Idle -> {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -3170,24 +3251,20 @@ private fun EmptyOrLoadingView(
                         modifier = Modifier.size(56.dp)
                     )
                     Text(
-                        text = "Upload or photograph a meal to get started",
-                        style = MaterialTheme.typography.titleMedium,
-                        textAlign = TextAlign.Center
+                        text = "Take or upload a photo of food to start",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = onPickImage) {
-                            Icon(Icons.Default.Image, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Choose Photo")
-                        }
-                        OutlinedButton(onClick = onUseCamera) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Camera")
-                        }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = onPickImage) { Text("Upload Photo") }
+                        OutlinedButton(onClick = onUseCamera) { Text("Camera") }
                     }
                 }
+            }
+            is AnalysisUiState.Success -> {
+                // Handled in main lazy column
             }
         }
     }
 }
+
