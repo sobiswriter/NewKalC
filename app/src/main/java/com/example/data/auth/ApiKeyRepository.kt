@@ -23,11 +23,23 @@ class ApiKeyRepository(context: Context) {
         if (buildConfigKey.isNotEmpty() && buildConfigKey != "MY_GEMINI_API_KEY") {
             return buildConfigKey
         }
+        val buildConfigEnvKey = BuildConfig.ENV_GEMINI_API_KEY.trim()
+        if (buildConfigEnvKey.isNotEmpty() && buildConfigEnvKey != "MY_GEMINI_API_KEY") {
+            return buildConfigEnvKey
+        }
+        val systemEnvKey = (try { System.getenv("GEMINI_API_KEY") } catch (_: Throwable) { null })?.trim() ?: ""
+        if (systemEnvKey.isNotEmpty() && systemEnvKey != "MY_GEMINI_API_KEY") {
+            return systemEnvKey
+        }
         return ""
     }
 
     fun hasValidApiKey(): Boolean {
         return getEffectiveApiKey().isNotEmpty()
+    }
+
+    fun getUserApiKey(): String {
+        return prefs.getString(KEY_USER_API_KEY, "")?.trim() ?: ""
     }
 
     fun saveApiKey(key: String) {

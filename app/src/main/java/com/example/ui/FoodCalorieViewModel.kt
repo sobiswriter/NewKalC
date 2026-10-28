@@ -284,16 +284,13 @@ class FoodCalorieViewModel(
                     }
                 }
             } catch (e: Exception) {
-                val fallbackMeal = geminiService.getDeterministicFallbackAnalysis(null)
                 _uiState.update {
                     it.copy(
-                        activeMealResult = fallbackMeal,
-                        originalFoodNames = fallbackMeal.foods.map { food -> food.name },
-                        analysisState = AnalysisUiState.Success(fallbackMeal),
-                        feedbackBanner = "Loaded fallback meal analysis from verified database."
+                        activeMealResult = null,
+                        analysisState = AnalysisUiState.Error("Failed to open image file: ${e.message}"),
+                        feedbackBanner = "Failed to open image: ${e.message}"
                     )
                 }
-                refreshInsights(fallbackMeal)
             }
         }
     }
@@ -381,8 +378,10 @@ class FoodCalorieViewModel(
             } else {
                 _uiState.update {
                     it.copy(
+                        activeMealResult = null,
+                        originalFoodNames = emptyList(),
                         analysisState = AnalysisUiState.Analyzing(
-                            stepMessage = "Step 2/4: Gemini 3.8 Flash identifying foods on plate...",
+                            stepMessage = "Step 2/4: Gemini Vision identifying food on plate...",
                             stepIndex = 2,
                             totalSteps = 4,
                             progress = 0.45f
@@ -486,17 +485,30 @@ class FoodCalorieViewModel(
                         }
                     }
                     else -> {
-                        // Fallback: If image analysis fails or API key error occurs, load verified deterministic meal
-                        val fallbackMeal = geminiService.getDeterministicFallbackAnalysis(hint)
-                        _uiState.update {
-                            it.copy(
-                                activeMealResult = fallbackMeal,
-                                originalFoodNames = fallbackMeal.foods.map { food -> food.name },
-                                analysisState = AnalysisUiState.Success(fallbackMeal),
-                                feedbackBanner = "Offline / Fallback Mode: Loaded nutrient estimates from verified database."
-                            )
+                        if (!hint.isNullOrBlank()) {
+                            // Only preset demo samples load sample reference
+                            val fallbackMeal = geminiService.getDeterministicFallbackAnalysis(hint)
+                            _uiState.update {
+                                it.copy(
+                                    activeMealResult = fallbackMeal,
+                                    originalFoodNames = fallbackMeal.foods.map { food -> food.name },
+                                    analysisState = AnalysisUiState.Success(fallbackMeal),
+                                    feedbackBanner = "Demo Preset: Loaded $hint reference from verified database."
+                                )
+                            }
+                            refreshInsights(fallbackMeal)
+                        } else {
+                            // FOR USER CAMERA / GALLERY PHOTOS: BE 100% HONEST!
+                            val errMessage = error.message ?: "Failed to analyze image with Gemini. Please check your API key or connection."
+                            _uiState.update {
+                                it.copy(
+                                    activeMealResult = null,
+                                    originalFoodNames = emptyList(),
+                                    analysisState = AnalysisUiState.Error(errMessage),
+                                    feedbackBanner = "Analysis failed: $errMessage"
+                                )
+                            }
                         }
-                        refreshInsights(fallbackMeal)
                     }
                 }
             }
@@ -819,34 +831,13 @@ class FoodCalorieViewModel(
                         }
                     }
                     else -> {
-                        val fallbackItems = listOf(
-                            DetectedFoodItem(
-                                name = "Cucumber Raita",
-                                quantityDescription = "1 small bowl (~100g)",
-                                weightGrams = 100.0,
-                                cookingMethod = "Whisked spiced yogurt with cucumber",
-                                confidence = 0.88,
-                                visualCues = "Standard side katori ~8cm",
-                                nutritionReference = NutritionDatabase.resolveNutrition("Cucumber Raita"),
-                                source = FoodDetectionSource.IMAGE_ADDITION
-                            ),
-                            DetectedFoodItem(
-                                name = "Roasted Papad",
-                                quantityDescription = "1 crisp disc (~15g)",
-                                weightGrams = 15.0,
-                                cookingMethod = "Dry flame roasted",
-                                confidence = 0.85,
-                                visualCues = "Thin crispy round wafer ~15cm",
-                                nutritionReference = NutritionDatabase.resolveNutrition("Roasted Papad"),
-                                source = FoodDetectionSource.IMAGE_ADDITION
-                            )
-                        )
+                        val errMsg = error.message ?: "Failed to analyze side dish image."
                         _uiState.update {
                             it.copy(
                                 isAnalyzingSideDish = false,
-                                pendingSideDishItems = fallbackItems,
-                                sideDishError = null,
-                                feedbackBanner = "Offline / Demo Fallback: Loaded side dish estimates from database."
+                                pendingSideDishItems = null,
+                                sideDishError = errMsg,
+                                feedbackBanner = "Side dish analysis failed: $errMsg"
                             )
                         }
                     }

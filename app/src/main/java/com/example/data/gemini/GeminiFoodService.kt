@@ -29,21 +29,20 @@ import kotlin.math.roundToInt
 class GeminiFoodService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    // Primary model as requested: gemini-3.8-flash with ultra-fast fallbacks
+    // Primary model is the latest Gemini 3.8 Flash, followed by modern active 3.x Flash fallback models
     private val candidateModels = listOf(
         "gemini-3.8-flash",
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-flash-latest",
-        "gemini-3.1-flash-lite-preview"
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest"
     )
 
     /**
@@ -81,7 +80,7 @@ class GeminiFoodService {
             return@withContext Result.failure(IllegalArgumentException("API Key cannot be empty."))
         }
 
-        val testModels = listOf("gemini-3.8-flash", "gemini-flash-latest")
+        val testModels = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest")
         var lastErrorMsg = "Failed to connect"
 
         for (modelName in testModels) {
@@ -152,21 +151,29 @@ class GeminiFoodService {
         }
 
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
-            ?: BuildConfig.GEMINI_API_KEY.trim())
+            ?: BuildConfig.GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
+            ?: BuildConfig.ENV_GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
+            ?: (try { System.getenv("GEMINI_API_KEY") } catch (_: Throwable) { null })?.trim() ?: "")
 
         // Check if API key is valid or missing
         val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
 
         if (!isRealKey) {
-            Log.w("GeminiFoodService", "No custom GEMINI_API_KEY provided; using deterministic vision fallback.")
-            val fallbackMeal = getDeterministicFallbackAnalysis(sampleContextHint)
-            val fallbackNames = fallbackMeal.foods.map { it.name }
-            onStageUpdate?.invoke(2, "Step 2/4: Identified ${fallbackNames.size} distinct items...", fallbackNames)
-            onStageUpdate?.invoke(3, "Step 3/4: Resolving macros from Nutrition Database...", fallbackNames)
-            return@withContext Result.success(fallbackMeal)
+            if (!sampleContextHint.isNullOrBlank()) {
+                Log.w("GeminiFoodService", "Demo sample mode: loading preset reference for $sampleContextHint")
+                val fallbackMeal = getDeterministicFallbackAnalysis(sampleContextHint)
+                val fallbackNames = fallbackMeal.foods.map { it.name }
+                onStageUpdate?.invoke(2, "Step 2/4: Identified ${fallbackNames.size} preset items...", fallbackNames)
+                onStageUpdate?.invoke(3, "Step 3/4: Resolving macros from Nutrition Database...", fallbackNames)
+                return@withContext Result.success(fallbackMeal)
+            } else {
+                return@withContext Result.failure(
+                    IllegalStateException("Google AI Studio API key not found. Please tap the top-right menu (⋮) -> 'API Key Settings' to enter your API key, or set GEMINI_API_KEY in the Secrets panel.")
+                )
+            }
         }
 
-        onStageUpdate?.invoke(2, "Step 2/4: Gemini 3.8 Flash identifying foods on plate...", emptyList())
+        onStageUpdate?.invoke(2, "Step 2/4: Gemini identifying foods on plate / packaging...", emptyList())
 
         try {
             val base64Image = bitmapToBase64(bitmap)
@@ -176,53 +183,62 @@ You are a specialized food identification and nutrition analysis engine with a S
 
 STEP 1: STRICT FOOD VALIDATION GATE (Mandatory)
 Examine the image carefully:
-- Does this image clearly depict recognizable FOOD, a MEAL, BEVERAGE, or EDIBLE INGREDIENTS?
-- If the image contains a PERSON (selfie, face, human portrait, body, hands without food), ANIMAL/PET, OBJECT, COMPUTER, FURNITURE, LANDSCAPE, SCREENSHOT, or anything that is NOT food:
-  Set "is_food": false, "food_confidence": 0.0, "detected_foods": [], and specify "rejection_reason" (e.g. "Human photo detected - no food").
+- Does this image contain recognizable FOOD, a MEAL, BEVERAGE, CANDY, PACKAGED FOOD, SNACK, INGREDIENT, or EDIBLE PRODUCT?
+- Examples of valid FOOD:
+   - Any home-cooked or restaurant meals (rice, curries, meats, bowls, pastas, breads, salads)
+   - Packaged foods, snack packs, candy rolls (e.g. Mentos, mints, chocolates, chips, bars) even if held in a human hand or placed on a desk!
+   - Single fruits, vegetables, baked goods, drinks, smoothies, coffees, condiments.
+   - For all these: set "is_food": true and "food_confidence" to your confidence score (e.g. 0.90).
+- Examples of NON-FOOD (Must be rejected):
+   - A selfie, human face/portrait, human body without food
+   - Pets, animals, wildlife
+   - Electronics, laptops, phones, chargers
+   - Furniture, clothing, shoes, vehicles, landscapes, buildings
+   - Blank screens, blurry unintelligible shapes
+   - For non-food: set "is_food": false, "food_confidence": 0.0, "detected_foods": [], and specify "rejection_reason" (e.g. "Human photo detected - no food recognized" or "Electronics detected - not edible").
 - If the image is blurry, ambiguous, or food cannot be recognized with reasonable confidence (>= $validationThreshold):
   Set "is_food": false, "food_confidence": <score>, "detected_foods": [], and specify "rejection_reason" ("Ambiguous or unclear food").
-- ONLY if clear food is identified, set "is_food": true and "food_confidence" to your confidence score.
 
 STEP 2: FOOD IDENTIFICATION & PORTION ESTIMATION (ONLY IF is_food IS TRUE)
 If is_food is true:
-- Identify every distinct, recognizable food item visible on the plate/bowl/table.
+- Identify the exact food, dish, or packaged snack/candy. If it is a packaged or branded product (e.g. "Mentos Mint Candy", "Cadbury Dairy Milk", "Lay's Classic Potato Chips"), state the specific name!
 - For each item determine:
-   - food name
-   - approximate quantity description (e.g. "1 medium bowl", "1 fillet", "1 cup")
-   - estimated portion weight in grams (use visual cues: plate size ~26cm, bowl depth, food volume, density)
-   - cooking method when visually inferable (e.g. steamed, pan-seared, stir-fried, dum-cooked, deep-fried, raw)
-   - confidence score between 0.0 and 1.0
-   - visual cues used for portion estimation
-   - estimated reference calories per 100g
-   - estimated reference protein per 100g
-   - estimated reference carbs per 100g
-   - estimated reference fat per 100g
+   - "name": accurate name of the food item or product (e.g. "Mentos Mint Candy", "Steamed Basmati Rice", "Yellow Dal Tadka", "Grilled Salmon")
+   - "quantity_description": e.g. "1 roll (~37g)", "1 medium bowl", "1 fillet"
+   - "estimated_weight_grams": realistic portion weight in grams (e.g., 1 standard Mentos roll is ~37g, 1 cup of cooked rice is ~180g)
+   - "cooking_method": e.g. "Packaged / Ready-to-eat", "Steamed", "Pan-seared", "Dum-cooked"
+   - "confidence": confidence score between 0.0 and 1.0
+   - "visual_cues": specific visual cues seen in image (e.g., "Recognized blue Mentos Mint roll packaging held in hand", "Ceramic bowl depth ~4cm")
+   - "ref_calories_per_100g": standard reference calories per 100g (e.g. Mentos mints: 390.0; rice: 130.0)
+   - "ref_protein_per_100g": protein in grams per 100g (e.g. Mentos: 0.0)
+   - "ref_carbs_per_100g": carbs in grams per 100g (e.g. Mentos: 93.0)
+   - "ref_fat_per_100g": fat in grams per 100g (e.g. Mentos: 1.9)
 - Calculate overall meal confidence (0.0 to 1.0).
-- Provide an uncertainty explanation.
+- Provide an uncertainty explanation (e.g. "Standard single package portion size inferred from visible packaging").
 
 If is_food is false, "detected_foods" MUST be an empty array [].
 
 Respond strictly with valid JSON without markdown fences matching this schema:
 {
   "is_food": true,
-  "food_confidence": 0.85,
+  "food_confidence": 0.88,
   "rejection_reason": null,
   "detected_foods": [
     {
-      "name": "Chicken Biryani",
-      "quantity_description": "1 medium bowl",
-      "estimated_weight_grams": 250.0,
-      "cooking_method": "Dum-cooked with spices",
-      "confidence": 0.81,
-      "visual_cues": "Plate diameter ~26cm, bowl depth ~4cm",
-      "ref_calories_per_100g": 200.0,
-      "ref_protein_per_100g": 8.8,
-      "ref_carbs_per_100g": 23.2,
-      "ref_fat_per_100g": 7.6
+      "name": "Mentos Mint Candy",
+      "quantity_description": "1 roll (~37g)",
+      "estimated_weight_grams": 37.0,
+      "cooking_method": "Packaged confection",
+      "confidence": 0.92,
+      "visual_cues": "Recognized blue Mentos Mint roll packaging held in hand",
+      "ref_calories_per_100g": 390.0,
+      "ref_protein_per_100g": 0.0,
+      "ref_carbs_per_100g": 93.0,
+      "ref_fat_per_100g": 1.9
     }
   ],
-  "overall_confidence": 0.81,
-  "uncertainty_explanation": "Portion size is the largest source of uncertainty."
+  "overall_confidence": 0.90,
+  "uncertainty_explanation": "Portion size estimated from visible standard packaging."
 }
 """.trimIndent()
 
@@ -249,9 +265,9 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 })
             }
 
+            var primaryModelError: String? = null
             var lastError: Exception? = null
 
-            // Try candidate models in order: gemini-3.8-flash first!
             for (modelName in candidateModels) {
                 try {
                     val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
@@ -288,10 +304,16 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                             "API Error (${response.code})"
                         }
                         Log.w("GeminiFoodService", "Model $modelName failed: $errMsg. Trying next candidate...")
+                        if (modelName == "gemini-3.8-flash") {
+                            primaryModelError = errMsg
+                        }
                         lastError = Exception(errMsg)
                     }
                 } catch (e: Exception) {
                     Log.w("GeminiFoodService", "Exception with model $modelName: ${e.message}")
+                    if (modelName == "gemini-3.8-flash") {
+                        primaryModelError = e.message
+                    }
                     lastError = e
                     // If it's a validation exception (non-food/ambiguous), don't retry with other models, fail fast!
                     if (e is NonFoodException || e is AmbiguousFoodException) {
@@ -300,14 +322,37 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 }
             }
 
-            Log.w("GeminiFoodService", "All models failed ($lastError). Falling back to verified nutrition database analysis.")
-            Result.success(getDeterministicFallbackAnalysis(sampleContextHint))
+            val rawDetail = primaryModelError ?: lastError?.message ?: "Unable to connect to Gemini API"
+            val failureDetail = when {
+                rawDetail.contains("quota", ignoreCase = true) || rawDetail.contains("429") ->
+                    "Gemini 3.8 Flash rate limit or quota exceeded. Please wait a moment before retrying, or check your API key in settings."
+                rawDetail.contains("API_KEY_INVALID", ignoreCase = true) || rawDetail.contains("API key not valid", ignoreCase = true) ->
+                    "Invalid Google AI Studio API key. Please tap the top-right menu (⋮) -> 'API Key Settings' to check your key."
+                rawDetail.contains("503") || rawDetail.contains("high demand", ignoreCase = true) ->
+                    "Gemini 3.8 Flash is temporarily experiencing high demand. Please tap Retry in a few seconds."
+                else -> rawDetail
+            }
+
+            if (!sampleContextHint.isNullOrBlank()) {
+                Log.w("GeminiFoodService", "Candidate models failed on sample preset ($failureDetail). Loading preset reference.")
+                Result.success(getDeterministicFallbackAnalysis(sampleContextHint))
+            } else {
+                Log.e("GeminiFoodService", "All models failed on user photo: $failureDetail")
+                Result.failure(
+                    Exception("Gemini Vision analysis failed: $failureDetail")
+                )
+            }
         } catch (e: Exception) {
             if (e is NonFoodException || e is AmbiguousFoodException) {
                 Result.failure(e)
-            } else {
-                Log.e("GeminiFoodService", "Exception during Gemini analysis: ${e.message}. Using deterministic fallback.", e)
+            } else if (!sampleContextHint.isNullOrBlank()) {
+                Log.e("GeminiFoodService", "Exception during sample analysis: ${e.message}. Using sample preset.", e)
                 Result.success(getDeterministicFallbackAnalysis(sampleContextHint))
+            } else {
+                Log.e("GeminiFoodService", "Exception during user photo analysis: ${e.message}", e)
+                Result.failure(
+                    Exception("Image analysis error: ${e.message ?: "Failed to reach Gemini API"}. Please check your connection and API key.")
+                )
             }
         }
     }
@@ -331,36 +376,14 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         }
 
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
-            ?: BuildConfig.GEMINI_API_KEY.trim())
+            ?: BuildConfig.GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
+            ?: BuildConfig.ENV_GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
+            ?: (try { System.getenv("GEMINI_API_KEY") } catch (_: Throwable) { null })?.trim() ?: "")
         val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
 
         if (!isRealKey) {
-            // In demo mode without API key, return verified side dish preset
-            val raitaRef = NutritionDatabase.resolveNutrition("Cucumber Raita")
-            val papadRef = NutritionDatabase.resolveNutrition("Roasted Papad")
-            return@withContext Result.success(
-                listOf(
-                    DetectedFoodItem(
-                        name = "Cucumber Raita",
-                        quantityDescription = "1 small bowl (~100g)",
-                        weightGrams = 100.0,
-                        cookingMethod = "Whisked spiced yogurt with cucumber",
-                        confidence = 0.90,
-                        visualCues = "Side bowl diameter ~8cm",
-                        nutritionReference = raitaRef,
-                        source = FoodDetectionSource.IMAGE_ADDITION
-                    ),
-                    DetectedFoodItem(
-                        name = "Roasted Papad",
-                        quantityDescription = "1 crisp disc (~15g)",
-                        weightGrams = 15.0,
-                        cookingMethod = "Dry flame roasted",
-                        confidence = 0.85,
-                        visualCues = "Thin crispy round wafer ~15cm",
-                        nutritionReference = papadRef,
-                        source = FoodDetectionSource.IMAGE_ADDITION
-                    )
-                )
+            return@withContext Result.failure(
+                IllegalStateException("Google AI Studio API key not found. Please tap the top-right menu (⋮) -> 'API Key Settings' to enter your API key.")
             )
         }
 
@@ -424,6 +447,9 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 })
             }
 
+            var primaryModelError: String? = null
+            var lastError: Exception? = null
+
             for (modelName in candidateModels) {
                 try {
                     val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
@@ -442,72 +468,45 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                             source = FoodDetectionSource.IMAGE_ADDITION
                         )
                         return@withContext Result.success(parsedMeal.foods)
+                    } else {
+                        val errMsg = try {
+                            val root = JSONObject(responseBody ?: "")
+                            root.optJSONObject("error")?.optString("message") ?: "API Error (${response.code})"
+                        } catch (_: Exception) {
+                            "API Error (${response.code})"
+                        }
+                        if (modelName == "gemini-3.8-flash") {
+                            primaryModelError = errMsg
+                        }
+                        lastError = Exception(errMsg)
                     }
                 } catch (e: Exception) {
+                    if (modelName == "gemini-3.8-flash") {
+                        primaryModelError = e.message
+                    }
+                    lastError = e
                     if (e is NonFoodException || e is AmbiguousFoodException) {
                         return@withContext Result.failure(e)
                     }
                 }
             }
 
-            Log.w("GeminiFoodService", "Side dish API call failed. Using deterministic fallback side dishes.")
-            val raitaRef = NutritionDatabase.resolveNutrition("Cucumber Raita")
-            val papadRef = NutritionDatabase.resolveNutrition("Roasted Papad")
-            Result.success(
-                listOf(
-                    DetectedFoodItem(
-                        name = "Cucumber Raita",
-                        quantityDescription = "1 small bowl (~100g)",
-                        weightGrams = 100.0,
-                        cookingMethod = "Whisked spiced yogurt with cucumber",
-                        confidence = 0.88,
-                        visualCues = "Side bowl diameter ~8cm",
-                        nutritionReference = raitaRef,
-                        source = FoodDetectionSource.IMAGE_ADDITION
-                    ),
-                    DetectedFoodItem(
-                        name = "Roasted Papad",
-                        quantityDescription = "1 crisp disc (~15g)",
-                        weightGrams = 15.0,
-                        cookingMethod = "Dry flame roasted",
-                        confidence = 0.85,
-                        visualCues = "Thin crispy round wafer ~15cm",
-                        nutritionReference = papadRef,
-                        source = FoodDetectionSource.IMAGE_ADDITION
-                    )
-                )
-            )
+            val rawDetail = primaryModelError ?: lastError?.message ?: "Unable to connect to Gemini API"
+            val failureDetail = when {
+                rawDetail.contains("quota", ignoreCase = true) || rawDetail.contains("429") ->
+                    "Gemini 3.8 Flash rate limit or quota exceeded. Please wait a moment before retrying."
+                rawDetail.contains("503") || rawDetail.contains("high demand", ignoreCase = true) ->
+                    "Gemini 3.8 Flash is temporarily experiencing high demand. Please try again in a few seconds."
+                else -> rawDetail
+            }
+            Log.e("GeminiFoodService", "Side dish API call failed: $failureDetail")
+            Result.failure(Exception("Failed to analyze additional food photo: $failureDetail"))
         } catch (e: Exception) {
             if (e is NonFoodException || e is AmbiguousFoodException) {
                 Result.failure(e)
             } else {
-                Log.e("GeminiFoodService", "Exception in side dish analysis: ${e.message}; using fallback items.", e)
-                val raitaRef = NutritionDatabase.resolveNutrition("Cucumber Raita")
-                val papadRef = NutritionDatabase.resolveNutrition("Roasted Papad")
-                Result.success(
-                    listOf(
-                        DetectedFoodItem(
-                            name = "Cucumber Raita",
-                            quantityDescription = "1 small bowl (~100g)",
-                            weightGrams = 100.0,
-                            cookingMethod = "Whisked spiced yogurt with cucumber",
-                            confidence = 0.88,
-                            visualCues = "Side bowl diameter ~8cm",
-                            nutritionReference = raitaRef,
-                            source = FoodDetectionSource.IMAGE_ADDITION
-                        ),
-                        DetectedFoodItem(
-                            name = "Roasted Papad",
-                            quantityDescription = "1 crisp disc (~15g)",
-                            weightGrams = 15.0,
-                            cookingMethod = "Dry flame roasted",
-                            confidence = 0.85,
-                            visualCues = "Thin crispy round wafer ~15cm",
-                            nutritionReference = papadRef,
-                            source = FoodDetectionSource.IMAGE_ADDITION
-                        )
-                    )
-                )
+                Log.e("GeminiFoodService", "Exception in side dish analysis: ${e.message}", e)
+                Result.failure(Exception("Failed to analyze side dish: ${e.message ?: "Unknown error"}. Please check your connection and API key."))
             }
         }
     }

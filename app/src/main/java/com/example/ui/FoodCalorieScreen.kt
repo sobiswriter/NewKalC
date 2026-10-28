@@ -466,7 +466,9 @@ fun FoodCalorieScreen(
                             )
                         )
                     },
-                    onUseCamera = launchCameraSafely
+                    onUseCamera = launchCameraSafely,
+                    onConfigureApiKey = { viewModel.openApiKeyDialog() },
+                    onRetry = { viewModel.retryAnalysis() }
                 )
             }
 
@@ -877,7 +879,8 @@ private fun CollapsibleMealHeader(
                             )
                     )
 
-                    // Top Left: AI Vision Verified Tag
+                    // Top Left: Origin Tag (Honest: Demo Preset vs Live Gemini AI Vision)
+                    val isDemoPreset = imageResId != null
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = Color.Black.copy(alpha = 0.65f),
@@ -893,11 +896,11 @@ private fun CollapsibleMealHeader(
                         ) {
                             Surface(
                                 shape = CircleShape,
-                                color = Color(0xFF10B981),
+                                color = if (isDemoPreset) Color(0xFF38BDF8) else Color(0xFF10B981),
                                 modifier = Modifier.size(7.dp)
                             ) {}
                             Text(
-                                text = "AI Vision Verified",
+                                text = if (isDemoPreset) "Demo Preset" else "Gemini Vision Verified",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold
@@ -3404,7 +3407,9 @@ private fun EmptyOrLoadingView(
     imageBitmap: Bitmap? = null,
     imageResId: Int? = null,
     onPickImage: () -> Unit,
-    onUseCamera: () -> Unit
+    onUseCamera: () -> Unit,
+    onConfigureApiKey: () -> Unit = {},
+    onRetry: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -3753,47 +3758,74 @@ private fun EmptyOrLoadingView(
                                 lineHeight = 20.sp
                             )
                         }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+
+                        val isKeyIssue = analysisState.message.contains("API key", ignoreCase = true) ||
+                                analysisState.message.contains("key", ignoreCase = true)
+
+                        if (isKeyIssue) {
                             Button(
-                                onClick = onPickImage,
+                                onClick = onConfigureApiKey,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
                                     .height(48.dp)
                             ) {
-                                Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Choose Photo", fontWeight = FontWeight.SemiBold)
+                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Configure API Key in Settings", fontWeight = FontWeight.Bold)
                             }
-                            OutlinedButton(
-                                onClick = onUseCamera,
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurface
-                                ),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                        } else {
+                            Button(
+                                onClick = onRetry,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
                                     .height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Retry Analysis", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedButton(
+                                onClick = onPickImage,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Choose Photo", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = onUseCamera,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
                             ) {
                                 Icon(
                                     Icons.Default.CameraAlt,
                                     contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
+                                    modifier = Modifier.size(16.dp),
                                     tint = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Camera", fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Camera", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }

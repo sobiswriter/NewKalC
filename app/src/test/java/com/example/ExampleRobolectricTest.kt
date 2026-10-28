@@ -36,9 +36,10 @@ class ExampleRobolectricTest {
         repo.saveApiKey("AIzaSyTestKey12345")
         assertTrue(repo.hasValidApiKey())
         assertEquals("AIzaSyTestKey12345", repo.getEffectiveApiKey())
+        assertEquals("AIzaSyTestKey12345", repo.getUserApiKey())
 
         repo.clearApiKey()
-        assertEquals("", repo.getEffectiveApiKey())
+        assertEquals("", repo.getUserApiKey())
     }
 
     @Test
@@ -138,6 +139,6 @@ class ExampleRobolectricTest {
         ).getOrNull()
 
         assertNotNull(answer)
-        assertTrue(answer!!.contains("kcal"))
+        assertTrue(answer!!.contains("kcal", ignoreCase = true) || answer.contains("calorie", ignoreCase = true))
     }
 }

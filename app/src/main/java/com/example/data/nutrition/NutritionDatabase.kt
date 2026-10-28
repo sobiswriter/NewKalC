@@ -324,6 +324,42 @@ object NutritionDatabase {
             carbsPer100g = 25.0,
             fatPer100g = 9.0,
             source = "Verified Indian Reference"
+        ),
+        NutritionReference(
+            foodKey = "mentos_mint",
+            displayName = "Mentos Mint Candy",
+            caloriesPer100g = 390.0,
+            proteinPer100g = 0.0,
+            carbsPer100g = 93.0,
+            fatPer100g = 1.9,
+            source = "USDA & Manufacturer Data"
+        ),
+        NutritionReference(
+            foodKey = "hard_chewy_candy",
+            displayName = "Mints / Hard & Chewy Candies",
+            caloriesPer100g = 385.0,
+            proteinPer100g = 0.1,
+            carbsPer100g = 94.0,
+            fatPer100g = 1.0,
+            source = "USDA FoodData Central"
+        ),
+        NutritionReference(
+            foodKey = "chocolate_bar",
+            displayName = "Milk / Dark Chocolate",
+            caloriesPer100g = 535.0,
+            proteinPer100g = 7.6,
+            carbsPer100g = 59.4,
+            fatPer100g = 29.7,
+            source = "USDA FoodData Central"
+        ),
+        NutritionReference(
+            foodKey = "potato_chips",
+            displayName = "Crispy Potato Chips",
+            caloriesPer100g = 536.0,
+            proteinPer100g = 7.0,
+            carbsPer100g = 53.0,
+            fatPer100g = 34.0,
+            source = "USDA FoodData Central"
         )
     )
 
@@ -377,6 +413,9 @@ object NutritionDatabase {
             normalized.contains("fries") -> return database.first { it.foodKey == "french_fries" }
             normalized.contains("burger") -> return database.first { it.foodKey == "beef_burger" }
             normalized.contains("pizza") -> return database.first { it.foodKey == "cheese_pizza" }
+            normalized.contains("mentos") || normalized.contains("mint") || normalized.contains("candy") -> return database.first { it.foodKey == "mentos_mint" }
+            normalized.contains("chocolate") || normalized.contains("cocoa") -> return database.first { it.foodKey == "chocolate_bar" }
+            normalized.contains("chip") || normalized.contains("crisp") -> return database.first { it.foodKey == "potato_chips" }
         }
 
         // 3. Fallback to AI-provided nutrition reference or standard meal averages
