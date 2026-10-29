@@ -111,7 +111,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
             NavigationBarItem(selected=true,onClick={c.go("home")},icon={Icon(Icons.Default.SoupKitchen,"Make a meal")},label={Text("Make a meal")})
             NavigationBarItem(selected=false,onClick=viewModel::openProfile,icon={Icon(Icons.Default.PersonOutline,"You")},label={Text("You")})
         } }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).imePadding().testTag("kitchen_content"),state=listState,contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding).wrapContentWidth(Alignment.CenterHorizontally).widthIn(max=680.dp).imePadding().testTag("kitchen_content"),state=listState,contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             item { Text(if(app.aiProvider==com.example.data.auth.AiProvider.VERTEX) { if(app.isVertexUnlocked)"VERTEX AI · CONNECTED" else "VERTEX AI · LOCKED" } else "GOOGLE AI STUDIO",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
             if(s.busy!=null)item { Column(verticalArrangement=Arrangement.spacedBy(8.dp)) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(s.busy!!,Modifier.semantics { liveRegion=LiveRegionMode.Polite }) } }
             if(s.error!=null || mediaError!=null || s.notice!=null)item { Surface(color=if(s.error!=null || mediaError!=null)MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,shape=RoundedCornerShape(16.dp)) {
@@ -169,8 +169,26 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
                 }
                 "detail" -> s.selected?.let { recipe ->
                     val match=RecipeMatcher.match(recipe.summary,s.pantry,s.brief)
-                    item { KitchenTitle(recipe.summary.title,recipe.summary.description); EditorialImage(recipe.summary.title); Caption("Representative illustration · the finished dish may differ") }
-                    item { Text("${recipe.summary.totalMinutes} min total · ${recipe.summary.activeMinutes} min active · ${recipe.summary.effort}\n${recipe.summary.style} · ${s.brief.servings} portions",style=MaterialTheme.typography.bodyLarge); Text("Why this fits",style=MaterialTheme.typography.titleLarge); Text(recipe.summary.balancedReason.ifBlank {"Uses ${recipe.summary.ingredients.filter {ingredient->s.pantry.any {it.key==ingredient.key}}.take(4).joinToString {it.name}}"}) }
+                    item {
+                        Text("THE COOKBOOK",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+                        Text(recipe.summary.title,style=MaterialTheme.typography.headlineMedium,modifier=Modifier.padding(vertical=12.dp).testTag("cookbook_title"))
+                        Text(recipe.summary.description,style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(20.dp));EditorialImage(recipe.summary.title)
+                        Caption("Illustration · tap to view the full image")
+                    }
+                    item {
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            listOf("TOTAL" to "${recipe.summary.totalMinutes} min","ACTIVE" to "${recipe.summary.activeMinutes} min","SERVES" to "${s.brief.servings}").forEach {(label,value)->
+                                Surface(Modifier.weight(1f),shape=RoundedCornerShape(12.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                                    Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {Text(label,style=MaterialTheme.typography.labelSmall);Text(value,style=MaterialTheme.typography.titleMedium)}
+                                }
+                            }
+                        }
+                        Caption("${recipe.summary.style} · ${recipe.summary.effort}")
+                        if(recipe.summary.balancedReason.isNotBlank())Text(recipe.summary.balancedReason,style=MaterialTheme.typography.bodyMedium)
+                    }
+                    item { Button(onClick=c::prepareCooking,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Prepare to cook")};TextButton(onClick={c.go("chat")}) {Text("Ask about this recipe")} }
+
                     if(match.blocked.isNotEmpty())item {Text(match.blocked.joinToString(),color=MaterialTheme.colorScheme.error)}
                     if(match.missing.isNotEmpty())item { Text("Before you start",style=MaterialTheme.typography.titleLarge); match.missing.forEach { ingredient -> Text("• ${amount(ingredient)} ${ingredient.name} (${ingredient.state})") }; Caption("An exact shopping list, not available stock. Add what you obtained and confirm amounts before starting."); TextButton(onClick={c.go("ingredients")}) {Text("Update pantry")} }
                     item { Text("Ingredients",style=MaterialTheme.typography.titleLarge); recipe.summary.ingredients.forEach { ingredient -> val scaled=RecipeMatcher.scaled(ingredient,recipe.summary.servings,s.brief.servings); Column(Modifier.fillMaxWidth().padding(vertical=10.dp)) {Text(ingredient.name,style=MaterialTheme.typography.titleMedium);Text("${amount(scaled)} · ${ingredient.state}${if(ingredient.optional)" · optional" else ""}",color=MaterialTheme.colorScheme.onSurfaceVariant)};HorizontalDivider() }; Caption("Allergen declarations: ${recipe.summary.allergens.joinToString().ifBlank {"not specified"}}. Check labels and cross-contact; an AI recipe is not an allergy guarantee.") }
@@ -184,7 +202,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
                             }
                         }
                     }
-                    item { recipe.notes.forEach {Text(it)}; Button(onClick=c::prepareCooking,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Start cooking")}; OutlinedButton(onClick=c::saveRecipe,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Save recipe / my version")}; TextButton(onClick={c.go("chat")}) {Text("Ask about this recipe / rescue mode")} }
+                    item { if(recipe.notes.isNotEmpty()) {Text("Cook’s notes",style=MaterialTheme.typography.titleLarge);recipe.notes.forEach {Text("• $it",modifier=Modifier.padding(vertical=8.dp),style=MaterialTheme.typography.bodyLarge)}}; Button(onClick=c::prepareCooking,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Start cooking")}; OutlinedButton(onClick=c::saveRecipe,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Save recipe / my version")}; TextButton(onClick={c.go("chat")}) {Text("Ask about this recipe / rescue mode")} }
                 }
                 "prepare" -> s.selected?.let { recipe ->
                     val match=RecipeMatcher.match(recipe.summary,s.pantry,s.brief)

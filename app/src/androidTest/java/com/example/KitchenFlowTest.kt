@@ -40,11 +40,12 @@ class KitchenFlowTest {
             compose.onNodeWithTag("nav_make_a_meal").performClick()
             compose.onNodeWithText("Good things\nstart here.").assertIsDisplayed()
             screenshot("v14-kitchen")
-            compose.onNodeWithTag("recipe_illustration").performScrollTo().performClick()
+            compose.onNodeWithTag("kitchen_content").performScrollToNode(hasTestTag("recipe_illustration"))
+            compose.onNodeWithTag("recipe_illustration").performClick()
             compose.onNodeWithText("Recipe illustration").assertIsDisplayed()
             compose.onNodeWithContentDescription("Close full size image").performClick()
             click("Add ingredients by hand")
-            compose.onNodeWithTag("add_ingredient").performClick()
+            click("Add ingredient")
             compose.onNodeWithTag("ingredient_name").performTextInput("chickpeas")
             compose.onNodeWithTag("ingredient_quantity").performTextInput("200")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
@@ -52,7 +53,7 @@ class KitchenFlowTest {
             compose.onNodeWithTag("save_ingredient").performClick()
             try { compose.waitUntil(5000) {compose.onAllNodesWithTag("ingredient_name").fetchSemanticsNodes().isEmpty()} }
             finally {screenshot("v14-confirmation")}
-            compose.onNodeWithTag("confirm_ingredients").performScrollTo().performClick()
+            click("Confirm ingredients")
             click("Set the mood")
             compose.onNodeWithText("Your meal,\nyour way.").assertIsDisplayed()
             screenshot("v14-brief")
@@ -66,15 +67,19 @@ class KitchenFlowTest {
         val repo=HistoryRepository.get(context)
         val saved=repo.save(HistoryRecord(kind=HistoryKind.RECIPE,title=summary.title,recipe=recipe,servings=2))
         var cookedId:String?=null
+        lateinit var currentVm:FoodCalorieViewModel
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];vm.openHistory();vm.kitchen.openHistory(saved.id) }
-            compose.waitUntil(10000) {compose.onAllNodesWithText("Full recipe / make again").fetchSemanticsNodes().isNotEmpty()}
+            scenario.onActivity { activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];currentVm=vm;vm.openHistory();vm.kitchen.openHistory(saved.id) }
+            compose.waitUntil(10000) {currentVm.kitchen.state.value.historyRecord!=null && compose.onAllNodesWithTag("kitchen_content").fetchSemanticsNodes().isNotEmpty()}
             click("Full recipe / make again")
-            click("Start cooking")
-            compose.onNodeWithTag("begin_cooking").performScrollTo().assertIsNotEnabled()
+            compose.onNodeWithTag("cookbook_title").assertIsDisplayed()
+            screenshot("cookbook-refined")
+            click("Prepare to cook")
+            compose.onNodeWithTag("kitchen_content").performScrollToNode(hasTestTag("begin_cooking"))
+            compose.onNodeWithTag("begin_cooking").assertIsNotEnabled()
             click("200 g chickpeas · cooked")
             click("Begin cooking")
-            compose.waitUntil(10000) {compose.onAllNodesWithText("Next step").fetchSemanticsNodes().isNotEmpty()}
+            compose.waitUntil(10000) {currentVm.kitchen.state.value.page=="cook"}
             screenshot("v14-cooking")
             click("Next step")
             click("Finish")
@@ -85,8 +90,8 @@ class KitchenFlowTest {
             assertNotNull(repo.get(cookedId!!)!!.recipe)
         }
         ActivityScenario.launch(MainActivity::class.java).use {scenario ->
-            scenario.onActivity {activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];vm.openHistory();vm.kitchen.openHistory(cookedId!!)}
-            compose.waitUntil(10000) {compose.onAllNodesWithText("Full recipe / make again").fetchSemanticsNodes().isNotEmpty()}
+            scenario.onActivity {activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];currentVm=vm;vm.openHistory();vm.kitchen.openHistory(cookedId!!)}
+            compose.waitUntil(10000) {currentVm.kitchen.state.value.historyRecord!=null && compose.onAllNodesWithTag("kitchen_content").fetchSemanticsNodes().isNotEmpty()}
             compose.onNodeWithText("Offline chickpea bowl").assertExists()
             screenshot("v14-history")
         }

@@ -41,13 +41,15 @@ class VisualFlowTest {
             compose.onNodeWithTag("camera_button").assertIsDisplayed().assertHasClickAction()
             compose.onNodeWithTag("gallery_button").assertIsDisplayed().assertHasClickAction()
             capture("redesign-meal")
-            compose.onNodeWithTag("hero_adjust_button").performScrollTo().performClick()
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("adjust_meal_action_button"))
+            compose.onNodeWithTag("adjust_meal_action_button").performClick()
             val before = compose.onNodeWithText("Live Total:", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].first().text
             compose.onAllNodesWithContentDescription("Increase portion by 25g").onFirst().performClick()
             val after = compose.onNodeWithText("Live Total:", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].first().text
             assertNotEquals(before, after)
             capture("redesign-adjust")
             compose.onNodeWithTag("recalculate_button").performClick()
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("nav_insights"))
             compose.onNodeWithTag("nav_insights").performClick()
             compose.onNodeWithText("A little perspective").assertIsDisplayed()
             capture("redesign-insights")

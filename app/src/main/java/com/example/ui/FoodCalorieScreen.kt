@@ -2302,6 +2302,8 @@ private fun AskAiBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val chatListState = rememberLazyListState()
     val total = meal?.total
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val compact = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
 
     // Auto-scroll to latest message when messages change or while asking
     LaunchedEffect(chatMessages.size, isAsking) {
@@ -2358,7 +2360,7 @@ private fun AskAiBottomSheet(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    if (total != null) {
+                    if (total != null && !compact) {
                         Text(
                             text = "Context: ${total.calories} kcal · ${total.protein}P · ${total.carbs}C · ${total.fat}F",
                             style = MaterialTheme.typography.bodySmall,
@@ -2373,6 +2375,7 @@ private fun AskAiBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            if (!compact) {
             // Horizontal Prompt Suggestions
             Row(
                 modifier = Modifier
@@ -2402,10 +2405,11 @@ private fun AskAiBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            }
             // Chat Message List
             LazyColumn(
                 state = chatListState,
-                modifier = Modifier
+                modifier = Modifier.testTag("meal_chat_messages")
                     .weight(1f)
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -2480,6 +2484,7 @@ private fun AskAiBottomSheet(
                         keyboardActions = KeyboardActions(
                             onSend = {
                                 if (questionInput.isNotBlank() && !isAsking) {
+                                    keyboard?.hide()
                                     onSendQuestion(questionInput)
                                 }
                             }
@@ -2487,7 +2492,8 @@ private fun AskAiBottomSheet(
                     )
 
                     FilledIconButton(
-                        onClick = { onSendQuestion(questionInput) },
+                        onClick = { keyboard?.hide()
+                                    onSendQuestion(questionInput) },
                         enabled = questionInput.isNotBlank() && !isAsking,
                         colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
