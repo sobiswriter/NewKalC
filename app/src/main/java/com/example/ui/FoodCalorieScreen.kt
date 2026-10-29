@@ -145,6 +145,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.example.R
+import com.example.data.auth.AiProvider
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
 import com.example.data.model.FoodDetectionSource
@@ -349,7 +350,10 @@ fun FoodCalorieScreen(
         topBar = {
             MainFoodTopAppBar(
                 viewModel = viewModel,
-                isApiKeyConfigured = uiState.isApiKeyConfigured,
+                isApiKeyConfigured = if (uiState.aiProvider == AiProvider.VERTEX) uiState.isVertexUnlocked else uiState.isApiKeyConfigured,
+                connectionLabel = if (uiState.aiProvider == AiProvider.VERTEX) {
+                    if (uiState.isVertexUnlocked) "Vertex AI · On Sundays" else "Vertex AI · Locked"
+                } else if (uiState.isApiKeyConfigured) "AI Studio · Connected" else "AI Studio · API key required",
                 onOpenGallery = {
                     galleryLauncher.launch(
                         androidx.activity.result.PickVisualMediaRequest(
@@ -592,6 +596,12 @@ fun FoodCalorieScreen(
     // Dialog: API Key & Validation Settings
     if (uiState.showApiKeyDialog) {
         ApiKeySettingsDialog(
+            provider = uiState.aiProvider,
+            isVertexUnlocked = uiState.isVertexUnlocked,
+            isUnlockingVertex = uiState.isUnlockingVertex,
+            onProviderChanged = { viewModel.selectAiProvider(it) },
+            onUnlockVertex = { passkey, onDone -> viewModel.unlockVertex(passkey, onDone) },
+            onLockVertex = { viewModel.lockVertex() },
             currentMaskedKey = uiState.currentApiKeyMasked,
             isConfigured = uiState.isApiKeyConfigured,
             isTesting = uiState.isTestingApiKey,
@@ -616,6 +626,7 @@ fun FoodCalorieScreen(
 private fun MainFoodTopAppBar(
     viewModel: FoodCalorieViewModel,
     isApiKeyConfigured: Boolean,
+    connectionLabel: String,
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit
 ) {
@@ -643,7 +654,7 @@ private fun MainFoodTopAppBar(
                     ) {}
                 }
                 Text(
-                    text = "Vision · Portion · Nutrition DB",
+                    text = connectionLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -3006,6 +3017,12 @@ private fun NutritionDatabaseDialog(
 
 @Composable
 private fun ApiKeySettingsDialog(
+    provider: AiProvider,
+    isVertexUnlocked: Boolean,
+    isUnlockingVertex: Boolean,
+    onProviderChanged: (AiProvider) -> Unit,
+    onUnlockVertex: (String, (Boolean, String) -> Unit) -> Unit,
+    onLockVertex: () -> Unit,
     currentMaskedKey: String,
     isConfigured: Boolean,
     isTesting: Boolean,
@@ -3016,34 +3033,60 @@ private fun ApiKeySettingsDialog(
     onClearKey: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var keyInput by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf<String?>(null) }
+    var keyInput by remember(provider) { mutableStateOf("") }
+    var passwordVisible by remember(provider) { mutableStateOf(false) }
+    var statusText by remember(provider) { mutableStateOf<String?>(null) }
+    val isVertex = provider == AiProvider.VERTEX
+    val isBusy = isTesting || isUnlockingVertex
     val context = LocalContext.current
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isBusy) onDismiss() },
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(if (isStartup) "Welcome to Food Calorie AI" else "Settings & AI Configuration")
+                Text(if (isStartup) "Choose your AI connection" else "AI connection")
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = isVertex,
+                        onClick = { onProviderChanged(AiProvider.VERTEX) },
+                        enabled = !isBusy,
+                        label = { Text("Vertex AI server") },
+                        modifier = Modifier.testTag("provider_vertex")
+                    )
+                    FilterChip(
+                        selected = !isVertex,
+                        onClick = { onProviderChanged(AiProvider.AI_STUDIO) },
+                        enabled = !isBusy,
+                        label = { Text("AI Studio") },
+                        modifier = Modifier.testTag("provider_ai_studio")
+                    )
+                }
                 Text(
-                    text = if (isStartup) {
-                        "To analyze custom food photos in real-time with Gemini 3.8 Flash, enter your Google AI Studio API key. (Sample meals work offline immediately!)"
+                    text = if (isVertex) {
+                        "Use Vertex AI through On Sundays. Enter the server passkey to unlock access for this app session."
                     } else {
-                        "Enter your Google AI Studio API key to enable Gemini 3.8 Flash vision and conversational nutrition analysis."
+                        "Use your own Google AI Studio API key. Requests use your Google API quota and billing; no server passkey is required."
                     },
                     style = MaterialTheme.typography.bodyMedium
                 )
 
-                if (isConfigured) {
+                if (isVertex && isVertexUnlocked) {
+                    Text("Server unlocked · On Sundays", color = MaterialTheme.colorScheme.primary)
+                    TextButton(onClick = onLockVertex, enabled = !isBusy) { Text("Lock server") }
+                }
+
+                if (!isVertex && isConfigured) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xFFDCFCE7),
@@ -3062,23 +3105,26 @@ private fun ApiKeySettingsDialog(
                             )
                         }
                     }
+                    TextButton(onClick = onClearKey, enabled = !isBusy) { Text("Remove saved key") }
                 }
 
                 OutlinedTextField(
                     value = keyInput,
                     onValueChange = { keyInput = it },
-                    label = { Text("Paste AI Studio API Key (AIzaSy...)") },
+                    label = { Text(if (isVertex) "Server passkey" else "AI Studio API key (AIzaSy...)") },
+                    enabled = !isBusy,
+                    keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password),
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
                             Icon(
                                 imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = "Toggle key visibility"
+                                contentDescription = if (passwordVisible) "Hide credential" else "Show credential"
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("ai_credential_input")
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -3127,24 +3173,27 @@ private fun ApiKeySettingsDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    onSaveKey(keyInput) { success, msg ->
+                    val connect = if (isVertex) onUnlockVertex else onSaveKey
+                    connect(keyInput) { success, msg ->
                         statusText = msg
+                        keyInput = ""
                         if (success) {
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
-                enabled = keyInput.isNotBlank() && !isTesting
+                enabled = keyInput.isNotBlank() && !isBusy,
+                modifier = Modifier.testTag("connect_ai_provider")
             ) {
-                if (isTesting) {
+                if (isBusy) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.onPrimary)
                 } else {
-                    Text("Save & Validate")
+                    Text(if (isVertex) "Unlock server" else "Save & validate key")
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isBusy) {
                 Text(if (isStartup) "Use Sample Meals" else "Close")
             }
         }

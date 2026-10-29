@@ -9,6 +9,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.auth.ApiKeyRepository
+import com.example.data.auth.AiProvider
+import com.example.data.auth.VertexAccessRepository
+import com.example.data.auth.VertexAccessException
 import com.example.data.gemini.GeminiFoodService
 import com.example.data.model.AmbiguousFoodException
 import com.example.data.model.ChatMessage
@@ -24,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -68,6 +72,9 @@ data class FoodCalorieUiState(
     val showApiKeyDialog: Boolean = false,
     val isStartupPrompt: Boolean = false,
     val isTestingApiKey: Boolean = false,
+    val aiProvider: AiProvider = AiProvider.VERTEX,
+    val isVertexUnlocked: Boolean = false,
+    val isUnlockingVertex: Boolean = false,
     // Food Validation Gate configurable threshold
     val validationThreshold: Double = 0.65,
     // Full screen image inspection viewer
@@ -97,11 +104,13 @@ class FoodCalorieViewModel(
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val geminiService = GeminiFoodService()
     private val apiKeyRepository = ApiKeyRepository.getInstance(application)
+    private val vertexAccess = VertexAccessRepository(application)
+    private val geminiService = GeminiFoodService(vertexAccess)
 
     private val _uiState = MutableStateFlow(
         FoodCalorieUiState(
+            aiProvider = vertexAccess.provider,
             isApiKeyConfigured = apiKeyRepository.hasValidApiKey(),
             currentApiKeyMasked = maskApiKey(apiKeyRepository.getEffectiveApiKey()),
             showApiKeyDialog = !apiKeyRepository.hasValidApiKey() && !apiKeyRepository.hasDismissedStartupPrompt(),
@@ -132,6 +141,15 @@ class FoodCalorieViewModel(
     )
 
     init {
+        viewModelScope.launch {
+            vertexAccess.state.collectLatest { connection ->
+                _uiState.update { it.copy(aiProvider = connection.provider, isVertexUnlocked = connection.unlocked) }
+                if (connection.unlocked) {
+                    delay((connection.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+                    vertexAccess.lock()
+                }
+            }
+        }
         preloadDefaultSample()
     }
 
@@ -172,6 +190,37 @@ class FoodCalorieViewModel(
         }
     }
 
+    fun selectAiProvider(provider: AiProvider) {
+        if (provider == vertexAccess.provider) return
+        vertexAccess.selectProvider(provider)
+        _uiState.update { it.copy(aiProvider = provider, isVertexUnlocked = false, feedbackBanner = null) }
+    }
+
+    fun unlockVertex(passkey: String, onDone: (Boolean, String) -> Unit) {
+        if (_uiState.value.isUnlockingVertex) return
+        _uiState.update { it.copy(isUnlockingVertex = true) }
+        viewModelScope.launch {
+            val result = vertexAccess.unlock(passkey)
+            _uiState.update { it.copy(isUnlockingVertex = false) }
+            result.onSuccess {
+                apiKeyRepository.setStartupPromptDismissed(true)
+                _uiState.update { it.copy(showApiKeyDialog = false, feedbackBanner = "Vertex AI unlocked. Connected to On Sundays.") }
+                onDone(true, "Server unlocked.")
+            }.onFailure { onDone(false, it.message ?: "Server access denied.") }
+        }
+    }
+
+    fun lockVertex() {
+        vertexAccess.lock()
+        _uiState.update { it.copy(isVertexUnlocked = false, feedbackBanner = "Vertex AI locked.") }
+    }
+
+    private fun handleVertexAccessError(error: Throwable) {
+        if (error is VertexAccessException) {
+            _uiState.update { it.copy(isVertexUnlocked = false, showApiKeyDialog = true, feedbackBanner = error.message) }
+        }
+    }
+
     fun saveAndValidateApiKey(apiKey: String, onDone: (Boolean, String) -> Unit) {
         val cleanKey = apiKey.trim()
         if (cleanKey.isEmpty()) {
@@ -192,22 +241,12 @@ class FoodCalorieViewModel(
                         isApiKeyConfigured = true,
                         currentApiKeyMasked = maskApiKey(cleanKey),
                         showApiKeyDialog = false,
-                        feedbackBanner = "Google AI Studio API Key connected! Gemini 3.8 Flash is active."
+                        feedbackBanner = "Google AI Studio connected."
                     )
                 }
                 onDone(true, "Connected successfully!")
             }.onFailure { error ->
-                apiKeyRepository.saveApiKey(cleanKey)
-                apiKeyRepository.setStartupPromptDismissed(true)
-                _uiState.update {
-                    it.copy(
-                        isApiKeyConfigured = true,
-                        currentApiKeyMasked = maskApiKey(cleanKey),
-                        showApiKeyDialog = false,
-                        feedbackBanner = "API Key saved. (${error.message})"
-                    )
-                }
-                onDone(true, "Key saved.")
+                onDone(false, error.message ?: "Could not validate this API key. Please retry.")
             }
         }
     }
@@ -218,7 +257,7 @@ class FoodCalorieViewModel(
             it.copy(
                 isApiKeyConfigured = false,
                 currentApiKeyMasked = "",
-                feedbackBanner = "API Key removed. Reverted to demo mode."
+                feedbackBanner = "Saved AI Studio key removed."
             )
         }
     }
@@ -459,7 +498,11 @@ class FoodCalorieViewModel(
                     it.copy(analysisState = AnalysisUiState.Success(mealResult))
                 }
             }.onFailure { error ->
+                handleVertexAccessError(error)
                 when (error) {
+                    is VertexAccessException -> {
+                        _uiState.update { it.copy(activeMealResult = null, analysisState = AnalysisUiState.Error(error.message ?: "Server access denied.")) }
+                    }
                     is NonFoodException -> {
                         _uiState.update {
                             it.copy(
@@ -499,7 +542,7 @@ class FoodCalorieViewModel(
                             refreshInsights(fallbackMeal)
                         } else {
                             // FOR USER CAMERA / GALLERY PHOTOS: BE 100% HONEST!
-                            val errMessage = error.message ?: "Failed to analyze image with Gemini. Please check your API key or connection."
+                            val errMessage = error.message ?: "Failed to analyze image with Gemini. Please check your AI settings or connection."
                             _uiState.update {
                                 it.copy(
                                     activeMealResult = null,
@@ -531,8 +574,9 @@ class FoodCalorieViewModel(
                         isGeneratingInsights = false
                     )
                 }
-            }.onFailure {
-                val fallback = geminiService.getDeterministicNutritionInsights(meal)
+            }.onFailure { error ->
+                handleVertexAccessError(error)
+                val fallback = if (error is VertexAccessException) null else geminiService.getDeterministicNutritionInsights(meal)
                 _uiState.update {
                     it.copy(
                         nutritionInsights = fallback,
@@ -584,7 +628,8 @@ class FoodCalorieViewModel(
             )
 
             val replyText = responseResult.getOrElse {
-                "Based on your meal totals (${currentMeal.total.calories} kcal, ${currentMeal.total.protein}g protein), this meal provides balanced fuel. Adjusting portions will update these values."
+                handleVertexAccessError(it)
+                it.message ?: "Could not answer your question. Please retry."
             }
 
             val aiMessage = ChatMessage(isUser = false, text = replyText)
@@ -813,6 +858,7 @@ class FoodCalorieViewModel(
                     }
                 }
             }.onFailure { error ->
+                handleVertexAccessError(error)
                 when (error) {
                     is NonFoodException -> {
                         _uiState.update {

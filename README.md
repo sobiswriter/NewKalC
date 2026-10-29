@@ -1,6 +1,10 @@
 # 🥗 KalC — Food Calorie AI
 ### Deep Learning Multimodal Meal Recognition, Monocular Portion Estimation & Deterministic Nutrition Engine
 
+**AI connections:** In **API Key & AI Settings**, choose **Vertex AI server** to use the On Sundays backend with its shared passkey, or **AI Studio** to use your own Google API key. A wrong passkey grants no server access. Switching providers keeps your Studio key and locks the Vertex session. Server sessions last up to 12 hours and are cleared when the app process exits. Google usage charges and quotas apply to the chosen provider.
+
+Owner setup, backend checks, deployment, and passkey handling are documented in [server/README.md](server/README.md). The proposed visual refresh is in [docs/UI_OVERHAUL_PLAN.md](docs/UI_OVERHAUL_PLAN.md), with an interactive [design preview](docs/visual-overhaul-preview.html).
+
 <p align="center">
   <img src="docs/images/app_logo.jpg" alt="KalC App Logo" width="100" style="border-radius: 20px;"/>
 </p>
