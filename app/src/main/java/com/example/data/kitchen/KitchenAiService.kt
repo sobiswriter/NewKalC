@@ -43,7 +43,14 @@ class KitchenAiService(private val service: GeminiFoodService) {
         if(!confidence.isFinite() || confidence !in .65..1.0) throw AmbiguousFoodException("Ingredients are unclear. Use a closer photo or enter them by hand.")
         val array=json.getJSONArray("ingredients")
         require(array.length() in 1..30) { "No clear ingredients were found." }
-        return (0 until array.length()).map { ingredientAdapter.fromJson(array.getJSONObject(it).toString())!!.validated() }
+        return (0 until array.length()).map { index ->
+            val item=array.getJSONObject(index)
+            val unit=item.optString("unit").takeIf {it in KitchenIngredient.units}
+            val quantity=if(unit==null || item.isNull("quantity"))null else item.getDouble("quantity")
+            KitchenIngredient(name=item.getString("name"),quantity=quantity,unit=unit?:"g",
+                state=item.optString("state").takeIf {it in KitchenIngredient.states}?:"unknown",
+                grams=if(quantity==null || item.isNull("grams"))null else item.getDouble("grams")).validated()
+        }
             .groupBy { Triple(it.key,it.unit,it.state) }.values.map { duplicates -> if(duplicates.size==1)duplicates.single() else duplicates.first().copy(quantity=null,grams=null) }
     }
     suspend fun suggest(pantry: List<KitchenIngredient>, brief: MealBrief, profile: UserProfile, key: String, exclude: List<String>): List<RecipeSummary> {
@@ -110,8 +117,8 @@ class KitchenAiService(private val service: GeminiFoodService) {
             RECIPE: ${recipeAdapter.toJson(recipe)}
             PLATE ANALYSIS: ${scan.meal?.toFormattedJson()}
             VISUAL CUES: ${JSONArray(scan.meal?.foods?.map { it.visualCues }?:emptyList<String>())}
-            USER REPORT DATA: ${JSONObject.quote(record.note)}
+            USER REPORT DATA: ${JSONObject.quote((record.note+"\nPlate notes: "+scan.note).take(4000))}
         """.trimIndent(),emptyList(),key)
-        return CookingReview(strings(json.getJSONArray("observations"),5),strings(json.getJSONArray("uncertain"),5),strings(json.getJSONArray("nextTime"),2))
+        return CookingReview(strings(json.getJSONArray("observations"),5),strings(json.getJSONArray("uncertain"),5),strings(json.getJSONArray("nextTime"),2)).also {require(it.uncertain.isNotEmpty() && it.nextTime.isNotEmpty()) {"The cooking review was incomplete. Please retry."}}
     }
 }

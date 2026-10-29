@@ -49,6 +49,11 @@ class KitchenAiTest {
         assertTrue(runCatching {missing.recognize(listOf(bitmap),"fixture-key")}.isFailure)
         val nonfood=KitchenAiService(service("""{"is_food":false,"food_confidence":0.99,"ingredients":[]}"""))
         assertTrue(runCatching {nonfood.recognize(listOf(bitmap),"fixture-key")}.exceptionOrNull() is NonFoodException)
+        val uncertain=KitchenAiService(service("""{"is_food":true,"food_confidence":0.9,"ingredients":[{"name":"chickpeas","quantity":null,"unit":null,"state":null}]}"""))
+        val ingredient=uncertain.recognize(listOf(bitmap),"fixture-key").single()
+        assertNull(ingredient.quantity);assertEquals("unknown",ingredient.state)
+        val bowl=RecipeSummary(title="Bowl",description="Bowl",servings=2,totalMinutes=8,activeMinutes=8,style="Any",effort="Easy",equipment=emptyList(),ingredients=listOf(ingredient.copy(quantity=100.0,state="cooked")))
+        assertFalse(RecipeMatcher.match(bowl,listOf(ingredient),MealBrief()).ready)
     }
     @Test fun cookingProfileRequiresBothMasterAndSessionConsentAndOmitsBodyAndName() {
         val ai=KitchenAiService(service("{}"))

@@ -111,9 +111,25 @@ object RecipeMatcher {
             if(short > 0.001) need.copy(quantity = short) else null
         }
         val blocked = mutableListOf<String>()
-        val names = (recipe.ingredients.map { it.name } + recipe.allergens).joinToString(" ").lowercase()
+        val ingredientNames=recipe.ingredients.joinToString(" ") {it.name}.lowercase()
+            .replace(Regex("(coconut|almond|oat|soy|rice) milk"),"plant drink")
+            .replace(Regex("(peanut|almond|sunflower) butter"),"plant spread")
+        val names = ingredientNames+" "+recipe.allergens.joinToString(" ").lowercase()
         brief.avoid.forEach { avoid ->
-            val tokens = when(avoid.lowercase()) { "dairy" -> listOf("dairy", "milk", "yogurt", "yoghurt", "cheese", "butter", "ghee", "cream"); "gluten" -> listOf("gluten", "wheat", "flour", "bread", "pasta", "soy sauce"); "nuts" -> listOf("nut", "almond", "cashew", "walnut"); else -> listOf(canonical(avoid)) }
+            val meat=listOf("chicken","beef","pork","lamb","mutton","fish","salmon","tuna","shrimp","prawn","crab","lobster","gelatin","meat")
+            val dairy=listOf("dairy", "milk", "yogurt", "yoghurt", "cheese", "butter", "ghee", "cream")
+            val tokens = when(avoid.lowercase()) {
+                "dairy" -> dairy
+                "gluten" -> listOf("gluten", "wheat", "flour", "bread", "pasta", "soy sauce", "barley", "rye")
+                "nuts" -> listOf("nut", "almond", "cashew", "walnut", "pistachio")
+                "shellfish" -> listOf("shellfish","shrimp","prawn","crab","lobster","mussel","clam","oyster")
+                "peanut" -> listOf("peanut","groundnut","arachis")
+                "soy" -> listOf("soy","tofu","edamame","miso")
+                "sesame" -> listOf("sesame","tahini","gingelly")
+                "vegetarian" -> meat
+                "vegan" -> meat+dairy+listOf("egg","honey")
+                else -> listOf(canonical(avoid))
+            }
             if(tokens.any { it.isNotBlank() && names.contains(it) }) blocked += "Avoids $avoid"
         }
         recipe.equipment.filterNot { tool -> brief.equipment.any { it.equals(tool, true) } }.forEach { blocked += "Needs $it" }
@@ -131,7 +147,7 @@ object RecipeMatcher {
 data class CookingSession(
     val id: String = UUID.randomUUID().toString(), val recipe: CookbookRecipe,
     val servings: Int, val step: Int = 0, val timerEndsAt: Long? = null,
-    val confirmedCooked: Boolean = false, val note: String = ""
+    val confirmedCooked: Boolean = false, val note: String = "", val brief: MealBrief? = null
 )
 
 data class CookingReview(val observations: List<String>, val uncertain: List<String>, val nextTime: List<String>)

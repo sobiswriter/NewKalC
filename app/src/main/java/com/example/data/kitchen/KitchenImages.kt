@@ -17,7 +17,7 @@ object KitchenImages {
             while(bounds.outWidth/inSampleSize>1600 || bounds.outHeight/inSampleSize>1600) inSampleSize*=2
         }
         val bitmap=context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it,null,options) }?:error("The image could not be opened.")
-        val orientation=context.contentResolver.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL) }?:ExifInterface.ORIENTATION_NORMAL
+        val orientation=runCatching { context.contentResolver.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL) } }.getOrNull()?:ExifInterface.ORIENTATION_NORMAL
         val matrix=Matrix().apply { when(orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
             ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)

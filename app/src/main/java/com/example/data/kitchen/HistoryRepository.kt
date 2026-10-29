@@ -116,12 +116,14 @@ class HistoryRepository private constructor(context: Context) {
         changed.value++
     }
     @Synchronized fun saveSession(session: CookingSession) {
+        session.recipe.validated()
+        require(session.servings in 1..12 && session.step in session.recipe.steps.indices && session.note.length<=2000)
         val stream = sessionFile.startWrite()
         try { stream.write(sessionAdapter.toJson(session).toByteArray()); sessionFile.finishWrite(stream) }
         catch(e: Exception) { sessionFile.failWrite(stream); throw e }
     }
     @Synchronized fun session(): CookingSession? = if(!sessionFile.baseFile.exists()) null else
-        sessionFile.openRead().bufferedReader().use { sessionAdapter.fromJson(it.readText())?.also { s -> s.recipe.validated() } }
+        sessionFile.openRead().bufferedReader().use { sessionAdapter.fromJson(it.readText())?.also { s -> s.recipe.validated();require(s.servings in 1..12 && s.step in s.recipe.steps.indices) } }
     fun storageBytes(): Long = folder.listFiles()?.sumOf { it.length() } ?: 0
     companion object {
         @Volatile private var instance: HistoryRepository? = null
