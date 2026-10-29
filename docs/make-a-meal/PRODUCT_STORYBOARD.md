@@ -8,7 +8,7 @@ This is a proposed next feature, not an implemented Android release. The app rem
 
 ## The experience in one line
 
-**Show your ingredients → confirm what is there → answer a few useful questions → choose a recipe → cook with a companion.**
+**Show your ingredients → confirm what is there → answer a few useful questions → choose a recipe → cook with a companion → save the memory and learn for next time.**
 
 I interpreted “23 sections” as the **three** sections described: **Cook now**, **A few extras**, and **Worth the effort**. The third is the requested premium/ambitious category; it is not a proposed paywall.
 
@@ -32,9 +32,46 @@ A user opens the fridge and sees tomatoes, an onion, spinach, eggs, cooked chick
 | **7. Before you start** | Checks the ingredients and gathers the extras. Changes servings if needed. | An exact missing-items list, editable quantities and a deliberate “I have these now” confirmation. | Recheck availability when portions or ingredients change. Do not quietly add an ingredient used only in the method. |
 | **8. Cook with company** | Follows large, readable steps and starts relevant timers. | One step at a time, ingredient quantities for that step, next/previous and optional keep-screen-awake. | Cook mode must survive backgrounding/interruption. A timer is not a food-safety guarantee. |
 | **9. Ask while cooking** | Asks “Can I make this less spicy?”, “What can replace yogurt?”, or “Is dry chickpea a direct swap?” | Chat knows the chosen recipe version, confirmed pantry, current step, servings and permitted profile context. | Propose changes; confirm them before altering the recipe. Recalculate missing items and estimates after an accepted change. |
-| **10. Make it yours** | Finishes, saves a variation, or photographs the actual plate. | “Save my version”, “Make again”, and “See this meal in KalC”. | Close the loop: planned nutrition and the actual cooked plate are different estimates. Do not silently deduct pantry stock until the user confirms they cooked it. |
+| **10. I cooked this** | Explicitly confirms the meal was cooked, records substitutions and an optional note. | “Saved to Cooked meals”, the exact recipe version, servings, date and “Make again”. | Save the complete cooked recipe locally after confirmation, even if they skip the finished-plate scan. Opening a recipe or finishing the step preview alone does not prove it was cooked or eaten. |
+| **11. See how it turned out** | Optionally photographs the finished plate and confirms what changed. | “Scan & review in KalC” → food detection → editable nutrition estimates → observations, useful questions and next-time tips. | Link the scan and cooking review to the cooked meal; distinguish recipe estimates from actual-plate estimates. A photo cannot establish taste, internal doneness or safe cooking. |
+| **12. Your kitchen, remembered** | Returns days later from KalC, Make a meal or You. | A local timeline with All / Scanned / Cooked / Recipes views; saved photos, meal information, recipe versions and previous feedback. | Reopen saved information offline without another AI call. A cooked meal and its linked plate scan appear as one connected story, with both source records accessible. |
 
-The prototype has eight scenes because capture is folded into the opening and confirmation screens, and preparation is folded into recipe detail. The illustration highlights six key moments.
+The interactive prototype has eight scenes because capture is folded into the opening and confirmation screens, and preparation is folded into recipe detail. The illustration highlights six key moments. The added history/finish/review beats are planning panels below the walkthrough; they do not implement persistence or AI review.
+
+## Local history across the app
+
+History is a first-release feature shared by KalC and Make a meal. Keep the existing three main destinations; add a History entry in both feature headers, a recent-items preview in each home, and the full library in You. These are different views of the same local records, not separate copies.
+
+### Remember scanned meals
+
+- With local history enabled by default and clearly disclosed, automatically save every successful KalC meal analysis, including camera and imported-image scans. Keep the date/time, meal name, an app-private photo copy/thumbnail, item breakdown, portions, calorie/macro estimates, confidence/uncertainty, adjustments and saved insights. Preserve useful results, not merely a list of photo names.
+- Corrections update the saved meal with its original analysis retained as a revision where needed. Reopening uses the saved snapshot; recalculating or scanning again is an explicit action, linked as a new analysis rather than silently overwriting the old result.
+- Rejected non-food, ambiguous, failed or cancelled scans do not become successful food-history entries or acquire invented nutrition. Keep the existing non-food and ambiguity guardrails and their correction paths.
+
+### Remember confirmed cooking and the recipe
+
+- At the end of cooking, ask **“Did you cook this?”** with Confirm cooked / Not yet. Confirmation automatically records a cooked-meal entry and saves its full recipe snapshot: ingredients and quantities, servings, instructions, accepted substitutions, recipe version, date and optional personal notes. A successful camera scan is not required.
+- Offer **Scan & review in KalC** and **Done for now**. Skipping the scan still leaves the recipe and cooked meal available offline. “Cooked” does not automatically mean eaten, a consumed portion, or a daily nutrition total.
+- Recipes can also be saved before cooking. Distinguish Saved recipe from Cooked meal, show repeat cooking sessions under the recipe, and let Make again start a fresh session. Check current ingredients and current restrictions again; old pantry availability and old profile consent are not reusable permissions.
+- Keep the linked finished-plate image, KalC analysis and cooking review attached to that cooking session. Do not duplicate or double-count it as two meals just because it also appears in Scanned history.
+
+### Review the actual result, with useful limits
+
+The optional finished-meal scan reuses KalC's food gate and nutrition calculation flow, with a separate cooking-review response bound to the selected recipe version. Ask for actual substitutions/amounts and the user's experience (for example, too dry, too salty, softer than intended, actual time) only where needed. Explain which observations come from the image and which come from their answers.
+
+The review should say **what appears to have worked**, **what remains uncertain**, and **one or two concrete changes for next time**. It can discuss visible browning, plating or apparent texture cautiously; taste, seasoning, internal temperature and safe doneness cannot be verified from the photo. Ask rather than claim “perfectly cooked” or invent a quality score. If the image is unclear or non-food, keep the confirmed cooking record and offer a retry without fabricated feedback. Preserve the last valid result if an AI request fails.
+
+Nutrition shown on the saved recipe remains a planned estimate; the plate scan is a separate estimate based on the actual portion and confirmed changes. They must be labeled and never added together as consumption. A review is optional: saving a cooked meal should never wait for AI, a server passkey, or an API key.
+
+### Local storage, privacy and a fast return visit
+
+- Save on-device in app-private storage, with indexed metadata and bounded thumbnails; page the timeline instead of loading all full-size photos. Keep completed analyses and recipe snapshots available offline without regeneration or an upstream request.
+- Retain saved entries across restarts and normal app updates. Do not silently discard old meal information to enforce a photo cache limit; expose storage use and controls to remove photos while retaining text, delete an entry or clear history. A save/storage failure must be visible and retryable, never reported as saved.
+- Provide a local-history toggle and explain its scope: off stops future automatic saves, existing entries remain until deleted, and an explicit Save action remains available. Device-local storage is not cloud sync or a recovery guarantee; uninstall/clear-data can remove it. Specify the Android backup policy before implementation rather than implying that local-only means backups never exist.
+- History is independent of the personalization switch. Saving/reopening a scan does not enable profiling, attach body/health details to history, or send the timeline to AI. New reviews use only the selected recipe, selected scan, user-provided answers and currently permitted context. Previously generated personalized insights can remain labeled historical results, but reopening them must not trigger a new personalized request.
+- Deleting a linked record must explain whether it removes the scan, cooked-session details or saved recipe. A user can retain a recipe while deleting meal photos/reviews; clearing history removes the local records and associated private images. Avoid orphaned files and dangling references.
+
+**Acceptance journey:** scan lunch → close/reopen and inspect the saved breakdown offline → cook a suggested dinner → confirm cooked and skip scanning → find its complete recipe in Cooked → later scan that plate → see one linked cooking story with separate nutrition/review results → make it again as a new session. Exercise profile-off, history-off, non-food, AI failure, storage-full, app restart/update and selective deletion cases.
 
 ## The three sections: rules, not marketing labels
 
@@ -83,7 +120,7 @@ The demo uses an **egg-free preference only**, not actual health information. Th
 7. Per-serving nutrition **estimates** from the app's ingredient database and confirmed quantities, with uncertainty. Never ask the language model to invent precise totals or present goals as medical prescriptions.
 8. Explicit allergens/avoidances derived from the complete ingredient list, plus label/cross-contact checks where needed. An image is not proof that a food is safe for an allergy.
 9. Accepted substitutions, their consequences, and recipe version history. Never say a substitution changes nothing when it changes flavour, method, time, nutrition or allergens.
-10. Start cooking, ask about this recipe, save my variation and make again. Save is a user action, not implicit profiling.
+10. Start cooking, ask about this recipe, save before cooking, confirm cooked and make again. Cooked confirmation saves that recipe version automatically; saving never enables profiling.
 
 ## Ideas I would add
 
@@ -92,7 +129,8 @@ The demo uses an **egg-free preference only**, not actual health information. Th
 - **Why this recipe?** A short factual explanation: “Uses your spinach, chickpeas and tomatoes; no extra shopping.” This makes recommendations understandable.
 - **One exact shopping list.** Only for the selected recipe, with quantities and a “got it” check. No retailer or purchasing integration is needed.
 - **Cook mode with interruption recovery.** A person's attention is on a hot pan. Recover the step and real timer state, and never block the saved recipe behind a fresh AI response.
-- **Cook → KalC.** A finishing action opens the existing meal scanner for the actual plate.
+- **Cook → KalC → History.** Confirm cooked to save the meal and its recipe, then optionally scan the actual plate for nutrition estimates and a bounded cooking review.
+- **Your kitchen memory.** Automatically remember successful KalC scans locally and offer recent items, a shared timeline and complete saved meal/recipe details.
 
 ### The next layer of delight
 
@@ -135,6 +173,8 @@ Price promises, grocery checkout, live video monitoring, voice listening, nutrit
 
 Use three top-level destinations: **KalC · Make a meal · You**. Inside KalC, keep meal analysis, insights and its meal chat together. Inside Make a meal, keep pantry → recipe board → cookbook → cooking chat together. The You page owns the existing profile and privacy settings. This avoids a fifth competing bottom tab and keeps the two AI chat contexts distinct.
 
+History is reachable from both feature headers and recent-items previews, with the full All / Scanned / Cooked / Recipes library in You. Reopening a record returns to its original meal/recipe context. The history addition is shown as static storyboard panels, not functioning app storage.
+
 Do not ask users to re-enter their profile. Session questions can be skipped/reused only when the data is still explicit and appropriate for this meal; new photos and dietary constraints always need review where changed.
 
 ## Build in thin, reviewable slices
@@ -151,7 +191,9 @@ These are proposed tasks for the new feature, not a replacement for the existing
 | **F. Selected cookbook** | Full steps and required ingredients agree; owned imagery has a fallback; quantities and estimated nutrition track portions. | Recipe detail service, validator and detail screen. | Ingredient-reference, missing-item, unavailable-image and scaling tests. Depends on E. |
 | **G. Cooking session** | Steps/checklists persist locally; real timers survive backgrounding; offline detail remains accessible once saved. | Cooking screen and session repository/timer integration. | Background/restart, denied notifications, screen sizes, large text, TalkBack. Depends on F. |
 | **H. Cooking chat** | Chat uses the selected recipe/step/brief; replacements require confirmation; profile-off and recipe revision changes invalidate stale context. | Separate recipe-chat state using the selected transport. | Swap/allergy conflicts, wrong recipe, stale result, quota and locked-server tests. Depends on B/D/F/G. |
-| **I. Finish and polish** | Completed plate can open KalC; save-my-version is explicit; the signed update preserves current user settings and profile consent. | Navigation, selected-recipe saving and documentation. | Full journey, regression suite, release install and real-device camera/timer check. Depends on preceding slices. |
+| **I. Local history and recipe library** | Successful scans save complete results locally; confirmed cooked meals save full recipe versions; linked records reopen offline and respect save/delete controls. | Shared local history repository, private image storage, indexed timeline/detail screens and navigation entry points. | Restart/update, storage failure, photo retention, history/profile toggles, duplicate linking and selective deletion. Depends on A/F/G; existing KalC scan saving can be developed independently. |
+| **J. Finish, scan and review** | Explicit cooked confirmation saves before any AI call; optional plate scan reuses KalC and links separate estimates; bounded cooking feedback survives failures without false doneness claims. | Finish screen, linked scan context, typed review operation and review/history detail. | Skipped scan, non-food/unclear photo, changed ingredients, AI/auth failure, stale recipe revisions and no double counting. Depends on B/H/I. |
+| **K. Release polish** | History and cooked recipes are discoverable across the app; prior user settings/profile consent survive; signed update passes the full journey. | Navigation, migration, documentation and release packaging. | Full regression suite, offline history, release install/update and real-device camera/timer/accessibility checks. Depends on preceding slices. |
 
 **Review checkpoint after D:** prove capture → confirmation → brief and consent before spending time on recipe polish. **Checkpoint after F:** prove quantities, matching and complete instructions before timers/chat. A signed build and real-device cooking rehearsal come before claiming the feature is ready.
 
@@ -170,6 +212,8 @@ Verified on 29 October 2026:
 
 These checks do not cover Android camera permissions, real AI output, persistent timers, real-device accessibility or recipe execution. Those remain acceptance work in the proposed build slices.
 
+**History amendment:** only the storyboard text and static planning panels have been extended. No local database, automatic save behavior, recipe persistence, finished-plate review, Android screen or APK has been implemented or runtime-tested for this addition.
+
 ## Decisions to make together
 
-My recommended starting choices are: **three top-level destinations**, **three recipe groups**, **a compact first batch plus more ideas**, **licensed/owned illustrations first**, and **a complete simple dinner before advanced automation**. The main visual alternative worth testing later is a returning-user pantry-first home versus the guided first-use flow shown here.
+My recommended starting choices are: **three top-level destinations**, **three recipe groups**, **local scan/cooked/recipe history in the first release**, **a compact first batch plus more ideas**, **licensed/owned illustrations first**, and **a complete simple dinner before advanced automation**. The main visual alternative worth testing later is a returning-user pantry-first home versus the guided first-use flow shown here.

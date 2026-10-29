@@ -8,6 +8,7 @@ Open `index.html` in a modern browser. It works from this folder with no install
 - `PROMPTS.md`: exact art prompts, references and review notes.
 - `model.js`: fictional sample catalogue and deterministic availability/quantity rules.
 - `storyboard.js` / `storyboard.css`: eight interactive scenes.
+- `index.html#km-history-plan`: static planning panels for local scan history, confirmed cooked recipes and optional finished-plate reviews. No history or review implementation is included.
 - `prototype-browser-check.jpg`: rendered browser view from verification; the checks and remaining limits are in the full product plan.
 
 Try these:
