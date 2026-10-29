@@ -1,5 +1,7 @@
 # Vertex migration verification — 2026-10-29
 
+**Latest app:** version 1.2 adds the native visual overhaul while retaining this backend/provider behavior. See [native screenshots, release, and upgrade checks](VISUAL_RELEASE_1_2.md). The version 1.1 artifact/hash below records the migration release.
+
 ## Delivered behavior
 
 In **API Key & AI Settings**, choose **Vertex AI server** or **AI Studio**. Vertex uses the On Sundays project (`gen-lang-client-0100408368`) and requires the shared server passkey. An incorrect passkey never obtains a session, and unauthenticated generation never invokes Vertex. AI Studio uses the user's own API key directly; it does not require or contact the protected server.
@@ -64,4 +66,4 @@ No live Studio API request was tested because a valid user-owned Studio key was 
 
 To install normally, transfer/download the signed APK onto the phone, open it, allow installation from that source if prompted, and tap Install. No USB debugging is needed. An older debug build must be uninstalled first because its signing certificate differs; that removes its settings. Future updates must retain the owner release signing key, stored privately outside Git.
 
-The service scales to zero and is limited to one instance. Its process-local throttle must be replaced with a shared limiter before scaling out. People holding the shared passkey can incur Vertex usage in On Sundays. The visual refresh is a proposal, not an applied native redesign.
+The service scales to zero and is limited to one instance. Its process-local throttle must be replaced with a shared limiter before scaling out. People holding the shared passkey can incur Vertex usage in On Sundays. The visual refresh was a proposal in version 1.1 and is implemented in the native version 1.2 app.

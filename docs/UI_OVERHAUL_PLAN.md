@@ -1,6 +1,6 @@
 # KalC — a calmer way to understand your plate
 
-Status: proposed visual direction; see `visual-overhaul-preview.html`. This is a reviewable prototype, not an implemented Android redesign or a live cloud connection.
+Status: implemented in the native Android app in **version 1.2**. Version 1.1 shipped only the provider migration; the HTML file was a design prototype. The installed 1.2 app now uses this direction in Compose, including the meal header, nutrition summary, navigation, editing, insights, chat, and AI connection screens. The original `visual-overhaul-preview.html` remains a historical design reference; screenshots of the native app are recorded in `VISUAL_RELEASE_1_2.md`.
 
 ## Design contract
 
@@ -18,7 +18,7 @@ Evolve the existing emerald identity into deep forest green, warm ivory, and a s
 | Accent | `#DDE9A8` | Small highlights; dark text only |
 | Warning | `#8D4D17` | Needs-review and uncertainty copy |
 
-The prototype is intentionally a fixed light palette so the direction is coherent. Android implementation needs explicit dark tokens and must retain user theme preferences. Let Android text scale; never use a fixed screen height. Use the existing 8dp grid and 48dp touch targets.
+The app ships explicit light and dark tokens and follows the system's light/dark preference. Wallpaper-derived dynamic colors are disabled so they cannot override the forest/ivory identity. Typography uses Android's built-in serif and sans-serif families, requiring no downloads. Nutrition values and connection choices wrap at narrow widths and large text sizes.
 
 ## Proposed screens
 
@@ -40,7 +40,7 @@ The prototype is intentionally a fixed light palette so the direction is coheren
 
 ## Rollout
 
-First ship and verify the provider migration. Then update theme and meal header, the editing sheet, and finally insights/chat. Keep the existing nutrition models and calculations. Add no navigation destination or persistent daily tracking feature unless requested.
+Version 1.2 applies the theme and native meal header, with the existing editing sheets, insights/chat, and connection forms adopting the same palette/type. A persistent Scan a meal action and gallery shortcut sit above the three navigation tabs. Sample meals stay explicitly labeled. Nutrition models, calculations, AI provider/session logic, and food guardrails are retained. The signed APK uses the same owner certificate as 1.1 so it upgrades in place.
 
 ## Prototype checks
 

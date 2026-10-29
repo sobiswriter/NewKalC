@@ -130,6 +130,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardActions
@@ -365,6 +369,29 @@ fun FoodCalorieScreen(
             )
         },
         bottomBar = {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 20.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = launchCameraSafely,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(52.dp).testTag("scan_meal_button")
+                    ) {
+                        Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Scan a meal")
+                    }
+                    OutlinedButton(
+                        onClick = { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(14.dp),
+                        modifier = Modifier.size(52.dp)
+                    ) { Icon(Icons.Default.Image, "Choose a meal photo") }
+                }
+
             SmartNavigationBottomBar(
                 activeTab = uiState.activeNavTab,
                 onTabSelected = { tabIndex ->
@@ -386,6 +413,7 @@ fun FoodCalorieScreen(
                     }
                 }
             )
+            }
         }
     ) { innerPadding ->
         Box(
@@ -400,9 +428,9 @@ fun FoodCalorieScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
                 ) {
                     val analysisState = uiState.analysisState
                     if (analysisState is AnalysisUiState.Analyzing) {
@@ -636,27 +664,29 @@ private fun MainFoodTopAppBar(
 
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.background
         ),
         title = {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Food Calorie AI",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = "KalC",
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(
                         shape = CircleShape,
-                        color = if (isApiKeyConfigured) Color(0xFF10B981) else Color(0xFFF59E0B),
+                        color = if (isApiKeyConfigured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.size(8.dp)
                     ) {}
                 }
                 Text(
                     text = connectionLabel,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         },
@@ -811,384 +841,6 @@ private fun MainFoodTopAppBar(
 // 2. COLLAPSIBLE FOOD ANALYSIS HEADER
 // ==========================================
 
-@Composable
-private fun CollapsibleMealHeader(
-    meal: MealAnalysisResult,
-    isCollapsed: Boolean,
-    imageBitmap: Bitmap?,
-    imageResId: Int?,
-    title: String,
-    onAdjustClick: () -> Unit,
-    onImageClick: () -> Unit
-) {
-    val total = meal.total
-    val confidencePct = (meal.overallConfidence * 100).roundToInt()
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-            .testTag("analysis_header_card"),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            if (!isCollapsed) {
-                // EXPANDED STATE: Large, high-clarity responsive image display with appetizing crop & gradient
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(230.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onImageClick() }
-                        .testTag("meal_image_expanded_box")
-                ) {
-                    // Appetizing food photography view using ContentScale.Crop
-                    if (imageBitmap != null) {
-                        Image(
-                            bitmap = imageBitmap.asImageBitmap(),
-                            contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else if (imageResId != null) {
-                        Image(
-                            painter = painterResource(id = imageResId),
-                            contentDescription = "Analyzed food photo. Tap to inspect full-screen.",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Restaurant,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .align(Alignment.Center)
-                        )
-                    }
-
-                    // Subtle bottom gradient vignette for contrast with the tap action badge
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp)
-                            .align(Alignment.BottomCenter)
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f))
-                                )
-                            )
-                    )
-
-                    // Top Left: Origin Tag (Honest: Demo Preset vs Live Gemini AI Vision)
-                    val isDemoPreset = imageResId != null
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color.Black.copy(alpha = 0.65f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isDemoPreset) Color(0xFF38BDF8) else Color(0xFF10B981),
-                                modifier = Modifier.size(7.dp)
-                            ) {}
-                            Text(
-                                text = if (isDemoPreset) "Demo Preset" else "Gemini Vision Verified",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    // Floating Pill: Tap to view full screen
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color.Black.copy(alpha = 0.65f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ZoomIn,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = "Tap to inspect photo",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                                color = Color.White,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Meal Title
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Estimated Calories & Confidence Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = if (total.calories > 0) "${total.calories}" else "Estimating...",
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                fontWeight = FontWeight.Black,
-                                color = ColorCalories
-                            )
-                        )
-                        if (total.calories > 0) {
-                            Text(
-                                text = "kcal",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = ColorCalories
-                                ),
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            )
-                            Text(
-                                text = "· estimated",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier.padding(bottom = 5.dp)
-                            )
-                        }
-                    }
-
-                    // Confidence pill
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = when {
-                            confidencePct >= 80 -> Color(0xFFDCFCE7)
-                            confidencePct >= 65 -> Color(0xFFFEF3C7)
-                            else -> Color(0xFFFEE2E2)
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = when {
-                                    confidencePct >= 80 -> Color(0xFF16A34A)
-                                    confidencePct >= 65 -> Color(0xFFD97706)
-                                    else -> Color(0xFFDC2626)
-                                },
-                                modifier = Modifier.size(6.dp)
-                            ) {}
-                            Text(
-                                text = "$confidencePct% Confidence",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = when {
-                                    confidencePct >= 80 -> Color(0xFF166534)
-                                    confidencePct >= 65 -> Color(0xFF92400E)
-                                    else -> Color(0xFF991B1B)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Full Macro Split Badges (Protein, Carbs, Fat)
-                val totalMacroGrams = (total.protein + total.carbs + total.fat).coerceAtLeast(1.0)
-                val proteinPct = ((total.protein / totalMacroGrams) * 100).roundToInt()
-                val carbsPct = ((total.carbs / totalMacroGrams) * 100).roundToInt()
-                val fatPct = (100 - proteinPct - carbsPct).coerceAtLeast(0)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    MacroPill(
-                        label = "Protein",
-                        amount = "${total.protein}g",
-                        pct = proteinPct,
-                        color = ColorProtein,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MacroPill(
-                        label = "Carbs",
-                        amount = "${total.carbs}g",
-                        pct = carbsPct,
-                        color = ColorCarbs,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MacroPill(
-                        label = "Fat",
-                        amount = "${total.fat}g",
-                        pct = fatPct,
-                        color = ColorFat,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                if (meal.uncertaintyExplanation.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = meal.uncertaintyExplanation,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            } else {
-                // COLLAPSED STATE: Compact single-row representation
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "Estimated ${total.calories} kcal",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = ColorCalories
-                        )
-                        Text(
-                            text = "${total.protein}P · ${total.carbs}C · ${total.fat}F",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    FilledTonalButton(
-                        onClick = onAdjustClick,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("collapsed_adjust_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Adjust Meal", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MacroPill(
-    label: String,
-    amount: String,
-    pct: Int,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = color.copy(alpha = 0.08f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.22f))
-    ) {
-        Column(
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = amount,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = color
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = "($pct%)",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = color,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
 // ==========================================
 // 3. WHAT'S IN YOUR MEAL (COMPACT EXPANDABLE ROWS)
 // ==========================================
@@ -1212,9 +864,9 @@ private fun WhatIsInYourMealSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "What's in your meal (${foods.size})",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                text = "The breakdown · ${foods.size}",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f)
             )
             TextButton(
                 onClick = onAddFoodClick,
@@ -1238,7 +890,8 @@ private fun WhatIsInYourMealSection(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -1295,7 +948,7 @@ private fun CompactFoodItemRow(
                         text = food.name,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
@@ -1501,7 +1154,8 @@ private fun AiNutritionInsightsSection(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("ai_nutrition_insights_section")
@@ -1519,7 +1173,8 @@ private fun AiNutritionInsightsSection(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
@@ -1528,9 +1183,8 @@ private fun AiNutritionInsightsSection(
                         modifier = Modifier.size(20.dp)
                     )
                     Text(
-                        text = "AI Nutrition Insights",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = "A little perspective",
+                        style = MaterialTheme.typography.titleLarge
                     )
                 }
 
@@ -1543,7 +1197,7 @@ private fun AiNutritionInsightsSection(
                 } else {
                     IconButton(
                         onClick = onRefreshInsights,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
@@ -1592,7 +1246,7 @@ private fun AiNutritionInsightsSection(
                         text = "Positives",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF16A34A)
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     insights.positives.take(if (isExpanded) 4 else 1).forEach { pos ->
@@ -1604,7 +1258,7 @@ private fun AiNutritionInsightsSection(
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = null,
-                                tint = Color(0xFF16A34A),
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier
                                     .size(16.dp)
                                     .padding(top = 2.dp)
@@ -1625,7 +1279,7 @@ private fun AiNutritionInsightsSection(
                         text = "Calorie & Balance Watch",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFD97706)
+                        color = MaterialTheme.colorScheme.tertiary
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     insights.concerns.take(if (isExpanded) 3 else 1).forEach { con ->
@@ -1637,7 +1291,7 @@ private fun AiNutritionInsightsSection(
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = null,
-                                tint = Color(0xFFD97706),
+                                tint = MaterialTheme.colorScheme.tertiary,
                                 modifier = Modifier
                                     .size(16.dp)
                                     .padding(top = 2.dp)
@@ -1793,8 +1447,8 @@ private fun SmartNavigationBottomBar(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding(),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 8.dp,
+        color = MaterialTheme.colorScheme.background,
+        shadowElevation = 0.dp,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
@@ -1805,12 +1459,7 @@ private fun SmartNavigationBottomBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(28.dp)
-                )
-                .padding(4.dp),
+                .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1848,35 +1497,35 @@ private fun NavigationTabItem(
     modifier: Modifier = Modifier
 ) {
     val backgroundColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
         label = "tab_bg"
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
         label = "tab_content"
     )
 
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(12.dp),
         color = backgroundColor,
-        modifier = modifier
+        modifier = modifier.testTag("nav_${title.lowercase().replace(' ', '_')}")
+            .semantics { selected = isSelected; role = Role.Tab }
     ) {
-        Row(
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = title,
+                contentDescription = null,
                 tint = contentColor,
                 modifier = Modifier.size(18.dp)
             )
-            Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = title,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 color = contentColor,
                 maxLines = 1,
@@ -1965,7 +1614,7 @@ private fun AdjustMealBottomSheet(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Adjust Meal",
                                     style = MaterialTheme.typography.titleLarge,
@@ -2144,7 +1793,7 @@ private fun MealItemEditRow(
                         onClick = { onWeightChanged((item.weightGrams - 25.0).coerceAtLeast(10.0)) },
                         shape = CircleShape,
                         contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(imageVector = Icons.Default.Remove, contentDescription = "Decrease portion by 25g")
                     }
@@ -2168,7 +1817,7 @@ private fun MealItemEditRow(
                         onClick = { onWeightChanged(item.weightGrams + 25.0) },
                         shape = CircleShape,
                         contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(48.dp)
                     ) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = "Increase portion by 25g")
                     }
@@ -2686,7 +2335,7 @@ private fun AskAiBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2698,7 +2347,7 @@ private fun AskAiBottomSheet(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "Ask AI About This Meal",
+                            text = "Ask about your plate",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -3015,6 +2664,7 @@ private fun NutritionDatabaseDialog(
 // 10. API KEY SETTINGS DIALOG
 // ==========================================
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun ApiKeySettingsDialog(
     provider: AiProvider,
@@ -3048,7 +2698,7 @@ private fun ApiKeySettingsDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(if (isStartup) "Choose your AI connection" else "AI connection")
+                Text(if (isStartup) "Choose your AI connection" else "AI connection", style = MaterialTheme.typography.titleLarge)
             }
         },
         text = {
@@ -3056,7 +2706,7 @@ private fun ApiKeySettingsDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = isVertex,
                         onClick = { onProviderChanged(AiProvider.VERTEX) },

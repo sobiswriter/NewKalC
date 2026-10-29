@@ -45,7 +45,7 @@ To revoke all sessions and rotate the passkey, generate a new owner configuratio
 
 ## Signed APK installation
 
-The release APK is non-debuggable and not test-only. Copy `KalC-v1.1.apk` to a phone and open it with Files/Downloads; approve Android's one-time installation permission for that source. USB debugging is unnecessary. Android 7.0 or later is required. This is APK distribution, not a Play Store listing.
+The release APK is non-debuggable and not test-only. Copy `KalC-v1.2.apk` to a phone and open it with Files/Downloads; approve Android's one-time installation permission for that source. Version 1.2 uses the same owner signing key and updates over signed 1.1 without uninstalling. USB debugging is unnecessary. Android 7.0 or later is required. This is APK distribution, not a Play Store listing.
 
 The owner release certificate/key is stored in `%LOCALAPPDATA%/KalC/kalc-release.jks`, with private signing settings in `release-signing.json` in that directory. Back up both privately: future updates must use this certificate. Do not commit or share them. To reproduce the release in PowerShell:
 

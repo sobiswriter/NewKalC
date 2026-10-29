@@ -47,11 +47,14 @@
 - [x] Build and signature-verify non-debug release 1.1, install/start it, and copy the APK to Downloads.
 - [x] Update installation, model, credentials, performance, and verification documentation.
 
-## Visual proposal implementation (future work)
+## Visual overhaul — native version 1.2
 
 - [x] Deliver and browser-verify `docs/visual-overhaul-preview.html` with `docs/UI_OVERHAUL_PLAN.md`.
-- [ ] Translate accepted design into existing Compose components; retain current editing/validation features.
-- [ ] Verify light/dark mode, 360dp width, large text, TalkBack, permission denial, and offline/error states.
+- [x] Translate the visual direction into native Compose, including theme, meal summary, editing, navigation, insights, chat, and provider settings.
+- [x] Verify portion recalculation, navigation, provider/passkey flow, and 360dp/130% text in dark mode on the emulator.
+- [x] Retain Gemini 3.8 Flash routing and food-validation logic; run the full unit suite.
+- [x] Build signed version 1.2 with the same release certificate as 1.1.
+- [ ] Physical-device camera, TalkBack, and vendor-specific Android rendering checks remain unverified.
 - Acceptance: complete meal workflow stays usable, provider status is clear, all controls have 48dp touch targets.
-- Verification: Android build plus emulator/device review; prototype does not count as shipped UI.
+- Verification: real Compose instrumentation, native screenshots, signed release build, and upgrade installation. See `docs/VISUAL_RELEASE_1_2.md`.
 - Files: current screen, theme tokens/type, targeted UI checks; scope: medium increments. Depends on design review, separate from migration.
