@@ -111,8 +111,9 @@ object RecipeMatcher {
             if(short > 0.001) need.copy(quantity = short) else null
         }
         val blocked = mutableListOf<String>()
+        val originalNames=(recipe.ingredients.map {it.name}+recipe.allergens).joinToString(" ").lowercase()
         val ingredientNames=recipe.ingredients.joinToString(" ") {it.name}.lowercase()
-            .replace(Regex("(coconut|almond|oat|soy|rice) milk"),"plant drink")
+            .replace(Regex("(coconut|almond|oat|soy|rice) (milk|cream)"),"plant drink")
             .replace(Regex("(peanut|almond|sunflower) butter"),"plant spread")
         val names = ingredientNames+" "+recipe.allergens.joinToString(" ").lowercase()
         brief.avoid.forEach { avoid ->
@@ -124,13 +125,15 @@ object RecipeMatcher {
                 "nuts" -> listOf("nut", "almond", "cashew", "walnut", "pistachio")
                 "shellfish" -> listOf("shellfish","shrimp","prawn","crab","lobster","mussel","clam","oyster")
                 "peanut" -> listOf("peanut","groundnut","arachis")
+                "fish" -> listOf("fish","salmon","tuna","cod","haddock","sardine","anchovies","trout")
                 "soy" -> listOf("soy","tofu","edamame","miso")
                 "sesame" -> listOf("sesame","tahini","gingelly")
                 "vegetarian" -> meat
                 "vegan" -> meat+dairy+listOf("egg","honey")
                 else -> listOf(canonical(avoid))
             }
-            if(tokens.any { it.isNotBlank() && names.contains(it) }) blocked += "Avoids $avoid"
+            val searchable=if(avoid.lowercase() in listOf("dairy","vegan")) names else originalNames
+            if(tokens.any { it.isNotBlank() && Regex("(?<![\\p{L}])"+Regex.escape(it)+"(?:s|es)?(?![\\p{L}])").containsMatchIn(searchable) }) blocked += "Avoids $avoid"
         }
         recipe.equipment.filterNot { tool -> brief.equipment.any { it.equals(tool, true) } }.forEach { blocked += "Needs $it" }
         val group = if(recipe.effort == "Project" || recipe.totalMinutes > 45) RecipeGroup.EFFORT else if(missing.isNotEmpty()) RecipeGroup.EXTRAS else RecipeGroup.NOW

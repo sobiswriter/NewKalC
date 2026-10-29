@@ -32,6 +32,7 @@ class KitchenController(
     val state = mutable.asStateFlow()
     private var job: Job? = null
     private var revision = 0L
+    private var historyRevision = 0L
     private val cookbookCache = mutableMapOf<String,CookbookRecipe>()
     init {
         scope.launch {
@@ -92,7 +93,7 @@ class KitchenController(
         task("Finding possibilities for your kitchen…") {
             val suggestions=io { ai.suggest(s.pantry,s.brief,profile(),apiKey(),if(more)s.recipes.map { it.title } else emptyList()) }
             currentCoroutineContext().ensureActive()
-            mutable.update { it.copy(recipes=(if(more)it.recipes else emptyList())+suggestions,page="results") }
+            mutable.update { it.copy(recipes=((if(more)it.recipes else emptyList())+suggestions).distinctBy {recipe -> recipe.title.trim().lowercase()},page="results") }
         }
     }
     fun grab(healthy: Boolean) {
@@ -101,7 +102,7 @@ class KitchenController(
         openRecipe(pick.recipe)
     }
     fun openRecipe(summary: RecipeSummary) {
-        cookbookCache[summary.id]?.let { recipe -> mutable.update { it.copy(selected=recipe,proposed=null,messages=emptyList(),page="detail") }; return }
+        cookbookCache[summary.id]?.let { recipe -> cancel(); mutable.update { it.copy(selected=recipe,proposed=null,messages=emptyList(),page="detail") }; return }
         task("Opening your cookbook…") {
             val recipe=io { ai.detail(summary,apiKey()) }
             currentCoroutineContext().ensureActive()
@@ -124,9 +125,16 @@ class KitchenController(
         if(match.missing.isNotEmpty()) { mutable.update { it.copy(error="Confirm the missing ingredients before starting. You can read the method meanwhile.") }; return }
         val session=CookingSession(recipe=recipe,servings=s.brief.servings,brief=s.brief.copy(profileConsent=false))
         task("Saving your cooking session…") {
-            io { history.saveSession(session) }
+            io { history.saveSession(session); CookingTimer.schedule(context,null,"") }
             mutable.update { it.copy(session=session,page="cook") }
         }
+    }
+    fun prepareCooking() { mutable.update { it.copy(page="prepare",confirmed=true,error=null) } }
+    fun confirmCookingIngredient(index: Int, available: Boolean) {
+        val s=state.value; val recipe=s.selected?:return
+        val ingredient=RecipeMatcher.scaled(recipe.summary.ingredients[index],recipe.summary.servings,s.brief.servings)
+        cancel()
+        mutable.update { it.copy(pantry=it.pantry.filterNot { old -> old.key==ingredient.key && old.state==ingredient.state && old.unit==ingredient.unit } + if(available)listOf(ingredient) else emptyList(),confirmed=true) }
     }
     fun resume() { state.value.session?.let { session -> mutable.update { s -> s.copy(selected=session.recipe,brief=(session.brief?:s.brief).copy(servings=session.servings,profileConsent=false),page=if(session.confirmedCooked)"finish" else "cook") } } }
     fun step(delta: Int) {
@@ -186,10 +194,12 @@ class KitchenController(
     fun acceptProposal() { val proposed=state.value.proposed?:return; mutable.update { it.copy(selected=proposed,proposed=null,session=null,messages=emptyList(),page="detail",notice="New recipe version selected. Review quantities and missing items before cooking.") } }
     fun declineProposal() { mutable.update { it.copy(proposed=null) } }
     fun refreshHistory(kind: HistoryKind? = state.value.historyKind, more: Boolean = false) {
+        val request=++historyRevision
         scope.launch {
             try {
                 val offset=if(more)state.value.historyRows.size else 0
                 val (rows,enabled,size)=io { Triple(history.rows(kind,offset),history.enabled,history.storageBytes()) }
+                if(request!=historyRevision)return@launch
                 mutable.update { it.copy(historyRows=(if(more)it.historyRows else emptyList())+rows,historyKind=kind,hasMoreHistory=rows.size==30,historyEnabled=enabled,storageBytes=size) }
             } catch(e: Exception) { mutable.update { it.copy(error="Could not read local history. Please retry.") } }
         }
@@ -201,7 +211,7 @@ class KitchenController(
             mutable.update { it.copy(historyRecord=record,linkedScans=linked,page="historyDetail") }
         }
     }
-    fun openSavedRecipe() { val record=state.value.historyRecord?:return; record.recipe?.let { recipe -> mutable.update { it.copy(selected=recipe,brief=it.brief.copy(servings=record.servings),page="detail",messages=emptyList()) } } }
+    fun openSavedRecipe() { cancel(); val record=state.value.historyRecord?:return; record.recipe?.let { recipe -> mutable.update { it.copy(selected=recipe,brief=it.brief.copy(servings=record.servings),page="detail",messages=emptyList()) } } }
     fun saveHistoryNote(note: String) {
         val record=state.value.historyRecord?:return
         task("Saving your notes…") { val updated=io {history.save(record.copy(note=note.take(2000)))};mutable.update {it.copy(historyRecord=updated,notice="Notes saved on this device.")} }

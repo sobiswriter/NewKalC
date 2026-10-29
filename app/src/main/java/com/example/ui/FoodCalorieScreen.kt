@@ -2861,7 +2861,7 @@ private fun ApiKeySettingsDialog(
 // ==========================================
 
 @Composable
-private fun FullScreenImageViewerDialog(
+internal fun FullScreenImageViewerDialog(
     bitmap: Bitmap?,
     resId: Int?,
     title: String,

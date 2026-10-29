@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -73,10 +75,13 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
     var mediaError by remember { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Int?>(null) }
     var deletion by remember { mutableStateOf<String?>(null) }
-    val handleImage: (Uri)->Unit = { uri -> scope.launch {
+    var viewingPhoto by remember { mutableStateOf<Bitmap?>(null) }
+    val handleImage: (Uri)->Unit = { uri ->
+        val asPlate=plateMode; val cookedTarget=captureCookedId
+        scope.launch {
         try {
             val bitmap=withContext(Dispatchers.IO) { KitchenImages.decode(context,uri) }
-            if(plateMode)viewModel.scanCookedPlate(bitmap,captureCookedId) else c.addPhoto(bitmap)
+            if(asPlate)viewModel.scanCookedPlate(bitmap,cookedTarget) else c.addPhoto(bitmap)
         } catch(e: Exception) { mediaError=e.message?:"Could not open the image." }
         finally { if(uri.toString()==cameraUri) { cameraUri?.let { saved -> runCatching { context.contentResolver.delete(Uri.parse(saved),null,null) } }; cameraUri=null } }
     } }
@@ -96,7 +101,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
         if(ContextCompat.checkSelfPermission(context,Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)launchCamera() else permission.launch(Manifest.permission.CAMERA)
     }
     val pickPhotos: (Boolean,String?)->Unit = { plate,id -> plateMode=plate;captureCookedId=id;gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-    val back: ()->Unit = { c.go(when(s.page) { "ingredients"->"home";"pantry"->"ingredients";"brief"->"pantry";"results"->"brief";"detail"->"results";"cook","chat","finish"->"detail";"historyDetail"->"history";else->"home" }) }
+    val back: ()->Unit = { c.go(when(s.page) { "ingredients"->"home";"pantry"->"ingredients";"brief"->"pantry";"results"->"brief";"detail"->"results";"prepare","cook","chat","finish"->"detail";"historyDetail"->"history";else->"home" }) }
     BackHandler { if(s.page=="home")viewModel.openKalc() else back() }
     Scaffold(topBar={ TopAppBar(title={ Text(if(s.page.startsWith("history"))"Your kitchen memory" else "Make a meal",style=MaterialTheme.typography.titleLarge) },
         navigationIcon={ IconButton(onClick={ if(s.page=="home")viewModel.openKalc() else back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack,"Back") } },
@@ -117,7 +122,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
                     item { KitchenTitle("Good things\nstart here.","From what you have to something you love. Photograph your ingredients, then make the final call on what is there.") }
                     item { EditorialImage("Your kitchen",0); Caption("Ingredient illustration · your photos stay separate") }
                     item { Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) { Button(onClick={takePhoto(false,null)},Modifier.weight(1f).testTag("ingredient_camera"),enabled=s.busy==null) { Text("Take photo") }; OutlinedButton(onClick={pickPhotos(false,null)},Modifier.weight(1f),enabled=s.photos.size<3 && s.busy==null) { Text("Add photos") } } }
-                    items(s.photos.size) { n -> Row(verticalAlignment=Alignment.CenterVertically) { Image(s.photos[n].asImageBitmap(),"Ingredient photo ${n+1}",Modifier.size(76.dp).clip(RoundedCornerShape(12.dp)),contentScale=ContentScale.Crop); Text("Photo ${n+1} of 3",Modifier.weight(1f).padding(12.dp)); TextButton(onClick={c.removePhoto(n)}) {Text("Remove")} } }
+                    items(s.photos.size) { n -> Row(verticalAlignment=Alignment.CenterVertically) { Image(s.photos[n].asImageBitmap(),"Ingredient photo ${n+1}",Modifier.size(96.dp).clip(RoundedCornerShape(12.dp)).clickable {viewingPhoto=s.photos[n]},contentScale=ContentScale.Crop); Text("Photo ${n+1} of 3",Modifier.weight(1f).padding(12.dp)); TextButton(onClick={c.removePhoto(n)}) {Text("Remove")} } }
                     item { Button(onClick=c::recognize,enabled=s.photos.isNotEmpty() && s.busy==null,modifier=Modifier.fillMaxWidth().testTag("recognize_ingredients")) { Text("Find my ingredients") }
                         TextButton(onClick={c.go("ingredients")},modifier=Modifier.fillMaxWidth()) { Text("Add ingredients by hand") } }
                     if(s.session!=null)item { OutlinedButton(onClick=c::resume,Modifier.fillMaxWidth()) { Text("Resume ${s.session!!.recipe.summary.title}") } }
@@ -168,10 +173,30 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
                     item { Text("${recipe.summary.totalMinutes} min total · ${recipe.summary.activeMinutes} min active · ${recipe.summary.effort}\n${recipe.summary.style} · ${s.brief.servings} portions",style=MaterialTheme.typography.bodyLarge); Text("Why this fits",style=MaterialTheme.typography.titleLarge); Text(recipe.summary.balancedReason.ifBlank {"Uses ${recipe.summary.ingredients.filter {ingredient->s.pantry.any {it.key==ingredient.key}}.take(4).joinToString {it.name}}"}) }
                     if(match.blocked.isNotEmpty())item {Text(match.blocked.joinToString(),color=MaterialTheme.colorScheme.error)}
                     if(match.missing.isNotEmpty())item { Text("Before you start",style=MaterialTheme.typography.titleLarge); match.missing.forEach { ingredient -> Text("• ${amount(ingredient)} ${ingredient.name} (${ingredient.state})") }; Caption("An exact shopping list, not available stock. Add what you obtained and confirm amounts before starting."); TextButton(onClick={c.go("ingredients")}) {Text("Update pantry")} }
-                    item { Text("Ingredients",style=MaterialTheme.typography.titleLarge); recipe.summary.ingredients.forEach { ingredient -> val scaled=RecipeMatcher.scaled(ingredient,recipe.summary.servings,s.brief.servings); Text("${amount(scaled)} ${ingredient.name} · ${ingredient.state}${if(ingredient.optional)" · optional" else ""}") }; Caption("Allergen declarations: ${recipe.summary.allergens.joinToString().ifBlank {"not specified"}}. Check labels and cross-contact; an AI recipe is not an allergy guarantee.") }
+                    item { Text("Ingredients",style=MaterialTheme.typography.titleLarge); recipe.summary.ingredients.forEach { ingredient -> val scaled=RecipeMatcher.scaled(ingredient,recipe.summary.servings,s.brief.servings); Column(Modifier.fillMaxWidth().padding(vertical=10.dp)) {Text(ingredient.name,style=MaterialTheme.typography.titleMedium);Text("${amount(scaled)} · ${ingredient.state}${if(ingredient.optional)" · optional" else ""}",color=MaterialTheme.colorScheme.onSurfaceVariant)};HorizontalDivider() }; Caption("Allergen declarations: ${recipe.summary.allergens.joinToString().ifBlank {"not specified"}}. Check labels and cross-contact; an AI recipe is not an allergy guarantee.") }
                     item { RecipeNutrition(recipe,s.brief.servings); Text("The method",style=MaterialTheme.typography.titleLarge); if(recipe.summary.servings!=s.brief.servings)Caption("Original method is for ${recipe.summary.servings} servings. Use scaled amounts above and step quantities in cooking mode; pan size and timings may need adjustment.") }
-                    items(recipe.steps.size) { n -> Text("${n+1}. ${recipe.steps[n].title}",style=MaterialTheme.typography.titleMedium); Text(recipe.steps[n].instruction) }
-                    item { recipe.notes.forEach {Text(it)}; Button(onClick={c.startCooking()},enabled=s.busy==null && match.missing.isEmpty() && match.blocked.isEmpty(),modifier=Modifier.fillMaxWidth()) {Text("Start cooking")}; OutlinedButton(onClick=c::saveRecipe,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Save recipe / my version")}; TextButton(onClick={c.go("chat")}) {Text("Ask about this recipe / rescue mode")} }
+                    items(recipe.steps.size) { n ->
+                        OutlinedCard(Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp)) {
+                            Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                                Text("STEP ${n+1}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+                                Text(recipe.steps[n].title,style=MaterialTheme.typography.titleMedium)
+                                Text(recipe.steps[n].instruction,style=MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                    item { recipe.notes.forEach {Text(it)}; Button(onClick=c::prepareCooking,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Start cooking")}; OutlinedButton(onClick=c::saveRecipe,enabled=s.busy==null,modifier=Modifier.fillMaxWidth()) {Text("Save recipe / my version")}; TextButton(onClick={c.go("chat")}) {Text("Ask about this recipe / rescue mode")} }
+                }
+                "prepare" -> s.selected?.let { recipe ->
+                    val match=RecipeMatcher.match(recipe.summary,s.pantry,s.brief)
+                    item { KitchenTitle("Before the first chop.","Confirm the amounts and preparation state you actually have. This does not buy ingredients or cook dry beans for you.") }
+                    items(recipe.summary.ingredients.size) { index ->
+                        val ingredient=RecipeMatcher.scaled(recipe.summary.ingredients[index],recipe.summary.servings,s.brief.servings)
+                        if(!ingredient.optional) CheckRow("${amount(ingredient)} ${ingredient.name} · ${ingredient.state}",match.missing.none {it.key==ingredient.key && it.state==ingredient.state}) {c.confirmCookingIngredient(index,it)}
+                    }
+                    item { Text("Equipment",style=MaterialTheme.typography.titleLarge) }
+                    items(recipe.summary.equipment) { tool -> CheckRow(tool,tool in s.brief.equipment) {checked->c.updateBrief(s.brief.copy(equipment=if(checked)(s.brief.equipment+tool).distinct() else s.brief.equipment-tool))} }
+                    if(match.blocked.isNotEmpty()) item { Text(match.blocked.joinToString(),color=MaterialTheme.colorScheme.error);TextButton(onClick={c.go("brief")}) {Text("Review food restrictions")} }
+                    item { Button(onClick=c::startCooking,enabled=s.busy==null && match.missing.isEmpty() && match.blocked.isEmpty(),modifier=Modifier.fillMaxWidth().testTag("begin_cooking")) {Text("Begin cooking")}; Caption("Confirm every required item above to continue.") }
                 }
                 "cook" -> s.session?.let { session ->
                     val step=session.recipe.steps[session.step]
@@ -208,7 +233,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
                 }
                 "historyDetail" -> s.historyRecord?.let { record ->
                     item { KitchenTitle(record.title,"${record.kind.name.lowercase().replaceFirstChar{it.uppercase()}} · ${DateFormat.getDateTimeInstance().format(Date(record.createdAt))}") }
-                    c.history.photo(record)?.let { photo -> item { AsyncImage(photo,"Saved meal photo",Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(20.dp)),contentScale=ContentScale.Crop) } }
+                    c.history.photo(record)?.let { photo -> item { AsyncImage(photo,"Saved meal photo",Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(20.dp)).clickable {scope.launch { runCatching {withContext(Dispatchers.IO) {KitchenImages.decode(context,Uri.fromFile(photo))}}.onSuccess {viewingPhoto=it}.onFailure {mediaError="This saved photo could not be opened."} }},contentScale=ContentScale.Crop) } }
                     item { var note by remember(record.id,record.note) {mutableStateOf(record.note)}; OutlinedTextField(note,{note=it.take(2000)},label={Text("Your notes: changes, taste or texture")},modifier=Modifier.fillMaxWidth(),minLines=2); TextButton(onClick={c.saveHistoryNote(note)},enabled=s.busy==null && note!=record.note) {Text("Save notes")} }
                     record.meal?.let { meal -> item { Text("Saved plate estimate",style=MaterialTheme.typography.titleLarge); Text("${meal.total.calories} kcal · ${meal.total.protein} g protein · ${meal.total.carbs} g carbs · ${meal.total.fat} g fat"); meal.foods.forEach {Text("${it.name} · ${it.weightGrams.toInt()} g · ${it.calories} kcal")}; Text(meal.uncertaintyExplanation); record.insights?.let {Text(it.headline);(it.positives+it.concerns+it.suggestions).forEach {Text("• $it")}}; if(record.personalizedInsights)Caption("Historical personalized insight. Opening it does not send profile data or enable new personalization."); Button(onClick={viewModel.loadHistoryScan(record)},Modifier.fillMaxWidth()) {Text("Open saved meal in KalC")} } }
                     record.recipe?.let { recipe -> item { Text("Saved recipe version",style=MaterialTheme.typography.titleLarge);Text("${recipe.summary.title} · ${record.servings} servings");Caption("Version ${recipe.version.take(8)}. Saved availability is not today's pantry.");OutlinedButton(onClick=c::openSavedRecipe,Modifier.fillMaxWidth()) {Text("Full recipe / make again")}; if(record.kind==HistoryKind.COOKED) {Button(onClick={takePhoto(true,record.id)},Modifier.fillMaxWidth()) {Text("Scan this cooked meal")}; TextButton(onClick={pickPhotos(true,record.id)}) {Text("Choose finished-plate photo")}} } }
@@ -221,6 +246,7 @@ fun KitchenScreen(viewModel: FoodCalorieViewModel) {
             item { Spacer(Modifier.height(12.dp)) }
         }
     }
+    viewingPhoto?.let {photo -> FullScreenImageViewerDialog(photo,null,"Meal photo",{viewingPhoto=null})}
     editing?.let { index -> IngredientDialog(if(index>=0)s.pantry.getOrNull(index) else null,onDismiss={editing=null}) { ingredient -> c.editIngredient(index,ingredient);editing=null } }
     deletion?.let { kind -> AlertDialog(onDismissRequest={deletion=null},title={Text(if(kind=="all")"Clear local history?" else if(kind=="photo")"Remove this photo?" else "Delete this entry?")},text={Text(if(kind=="all")"Removes all saved meal, recipe and review entries and their history photos on this device. Current cooking progress is separate." else if(kind=="photo")"Keeps the meal information and recipe while deleting its saved photo." else "Deletes this record and its photo. Linked scans are kept as standalone scans; separately saved recipes remain.")},confirmButton={TextButton(onClick={c.deleteHistory(if(kind=="all")null else s.historyRecord?.id,kind=="photo");deletion=null}) {Text("Delete")}},dismissButton={TextButton(onClick={deletion=null}) {Text("Keep")}}) }
 }
@@ -234,8 +260,14 @@ fun amount(i: KitchenIngredient) = if(i.quantity==null)"Amount unknown" else "${
 @Composable private fun HistoryRowCard(row: HistoryRow, open: ()->Unit) { OutlinedCard(onClick=open,modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(16.dp)) {Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {Text(row.title,style=MaterialTheme.typography.titleMedium);Caption("${row.kind.name.lowercase()} · ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM,DateFormat.SHORT).format(Date(row.createdAt))}${if(row.linkedCookedId!=null)" · linked to cooking" else ""}")}} }
 @Composable private fun EditorialImage(title: String, forcedTile: Int? = null) {
     val image=ImageBitmap.imageResource(R.drawable.recipe_editorial)
+    var fullImage by remember {mutableStateOf<Bitmap?>(null)}
     val lower=title.lowercase(); val tile=forcedTile?:when {"biryani" in lower->6;"flatbread" in lower->7;"omelette" in lower->5;"curry" in lower && "chickpea" in lower->4;"egg" in lower->3;"salad" in lower || "bowl" in lower->2;"chickpea" in lower->1;else->0}
-    Canvas(Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(24.dp))) { drawImage(image,IntOffset(tile%4*(image.width/4),tile/4*(image.height/2)),IntSize(image.width/4,image.height/2),IntOffset.Zero,IntSize(size.width.toInt(),size.height.toInt())) }
+    Canvas(Modifier.testTag("recipe_illustration").fillMaxWidth().height(210.dp).clip(RoundedCornerShape(24.dp)).clickable {fullImage=Bitmap.createBitmap(image.asAndroidBitmap(),tile%4*(image.width/4),tile/4*(image.height/2),image.width/4,image.height/2)}) { val tw=image.width/4; val th=image.height/2
+        val ratio=size.width/size.height
+        val sw=minOf(tw,(th*ratio).toInt()).coerceAtLeast(1)
+        val sh=minOf(th,(tw/ratio).toInt()).coerceAtLeast(1)
+        drawImage(image,IntOffset(tile%4*tw+(tw-sw)/2,tile/4*th+(th-sh)/2),IntSize(sw,sh),IntOffset.Zero,IntSize(size.width.toInt(),size.height.toInt())) }
+    fullImage?.let { FullScreenImageViewerDialog(it,null,"Recipe illustration",{fullImage=null}) }
 }
 @Composable private fun IngredientDialog(original: KitchenIngredient?, onDismiss: ()->Unit, save: (KitchenIngredient)->Unit) {
     var name by remember {mutableStateOf(original?.name?:"")};var quantity by remember {mutableStateOf(original?.quantity?.toString()?:"")};var unit by remember {mutableStateOf(original?.unit?:"g")};var state by remember {mutableStateOf(original?.state?:"unknown")};var soon by remember {mutableStateOf(original?.useSoon?:false)};var error by remember {mutableStateOf<String?>(null)}

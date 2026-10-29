@@ -36,6 +36,14 @@ class KitchenTest {
         val shrimp=recipe().copy(ingredients=listOf(KitchenIngredient("prawns",100.0,"g","raw")))
         assertTrue(RecipeMatcher.match(shrimp,emptyList(),MealBrief(avoid=listOf("shellfish"))).blocked.isNotEmpty())
     }
+    @Test fun plantMilkAvoidancesAndEggplantAreMatchedCorrectly() {
+        fun blocked(name:String,avoid:String)=RecipeMatcher.match(recipe().copy(ingredients=listOf(KitchenIngredient(name,100.0))),emptyList(),MealBrief(avoid=listOf(avoid))).blocked.isNotEmpty()
+        assertTrue(blocked("almond milk","nuts"))
+        assertTrue(blocked("soy milk","soy"))
+        assertFalse(blocked("coconut milk","dairy"))
+        assertFalse(blocked("eggplant","egg"))
+        assertTrue(blocked("salmon","fish"))
+    }
     @Test fun methodRequiresEveryIngredientAndRejectsUnknownReferences() {
         cookbook().validated()
         assertThrows(IllegalArgumentException::class.java) { cookbook().copy(steps=listOf(CookingStep("Add", "Add salt",listOf("salt")))).validated() }

@@ -40,6 +40,9 @@ class KitchenFlowTest {
             compose.onNodeWithTag("nav_make_a_meal").performClick()
             compose.onNodeWithText("Good things\nstart here.").assertIsDisplayed()
             screenshot("v14-kitchen")
+            compose.onNodeWithTag("recipe_illustration").performScrollTo().performClick()
+            compose.onNodeWithText("Recipe illustration").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Close full size image").performClick()
             click("Add ingredients by hand")
             compose.onNodeWithTag("add_ingredient").performClick()
             compose.onNodeWithTag("ingredient_name").performTextInput("chickpeas")
@@ -64,10 +67,13 @@ class KitchenFlowTest {
         val saved=repo.save(HistoryRecord(kind=HistoryKind.RECIPE,title=summary.title,recipe=recipe,servings=2))
         var cookedId:String?=null
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];vm.kitchen.editIngredient(-1,ingredient);vm.kitchen.confirmPantry();vm.openHistory();vm.kitchen.openHistory(saved.id) }
+            scenario.onActivity { activity -> val vm=ViewModelProvider(activity)[FoodCalorieViewModel::class.java];vm.openHistory();vm.kitchen.openHistory(saved.id) }
             compose.waitUntil(10000) {compose.onAllNodesWithText("Full recipe / make again").fetchSemanticsNodes().isNotEmpty()}
             click("Full recipe / make again")
             click("Start cooking")
+            compose.onNodeWithTag("begin_cooking").performScrollTo().assertIsNotEnabled()
+            click("200 g chickpeas · cooked")
+            click("Begin cooking")
             compose.waitUntil(10000) {compose.onAllNodesWithText("Next step").fetchSemanticsNodes().isNotEmpty()}
             screenshot("v14-cooking")
             click("Next step")
