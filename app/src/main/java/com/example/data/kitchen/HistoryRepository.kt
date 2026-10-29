@@ -46,7 +46,7 @@ class HistoryRepository private constructor(context: Context) {
     val changes = changed.asStateFlow()
     val enabled: Boolean get() = helper.readableDatabase.rawQuery("SELECT value FROM settings WHERE name='enabled'", null).use { !it.moveToFirst() || it.getString(0) != "false" }
     fun setEnabled(value: Boolean) {
-        helper.writableDatabase.insertWithOnConflict("settings", null, ContentValues().apply { put("name", "enabled"); put("value", value.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
+        check(helper.writableDatabase.insertWithOnConflict("settings", null, ContentValues().apply { put("name", "enabled"); put("value", value.toString()) }, SQLiteDatabase.CONFLICT_REPLACE) != -1L) { "Could not save the history setting." }
         changed.value++
     }
     fun rows(kind: HistoryKind? = null, offset: Int = 0, limit: Int = 30): List<HistoryRow> {
@@ -76,7 +76,7 @@ class HistoryRepository private constructor(context: Context) {
                 finally { if(scaled !== image) scaled.recycle() }
                 newPhoto!!.name
             } else record.imagePath ?: old?.imagePath
-            val saved = record.copy(imagePath = photo)
+            val saved = record.copy(imagePath = photo,linkedCookedId=record.linkedCookedId?.takeIf { get(it)?.kind==HistoryKind.COOKED })
             val values = ContentValues().apply {
                 put("id", saved.id); put("kind", saved.kind.name); put("title", saved.title); put("created", saved.createdAt)
                 put("linked", saved.linkedCookedId); put("payload", recordAdapter.toJson(saved))
@@ -92,9 +92,7 @@ class HistoryRepository private constructor(context: Context) {
     @Synchronized fun removePhoto(id: String) {
         val record = get(id) ?: return
         val old = record.imagePath
-        save(record.copy(imagePath = null))
-        // save preserves an existing photo on metadata updates; clear it deliberately here.
-        helper.writableDatabase.execSQL("UPDATE history SET payload=? WHERE id=?", arrayOf(recordAdapter.toJson(record.copy(imagePath = null)), id))
+        check(helper.writableDatabase.update("history",ContentValues().apply {put("payload",recordAdapter.toJson(record.copy(imagePath=null)))},"id=?",arrayOf(id))==1)
         old?.let { safePhoto(it)?.delete() }
         changed.value++
     }

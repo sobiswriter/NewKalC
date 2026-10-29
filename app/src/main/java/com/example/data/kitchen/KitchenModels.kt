@@ -11,7 +11,7 @@ data class KitchenIngredient(
 ) {
     val key: String get() = canonical(name)
     fun validated(): KitchenIngredient {
-        require(name.isNotBlank() && name.length <= 100) { "Use a short ingredient name." }
+        require(name.isNotBlank() && name.length <= 100 && key.isNotBlank()) { "Use a short ingredient name." }
         require(quantity == null || quantity.isFinite() && quantity > 0 && quantity <= 100000) { "Enter a positive ingredient amount." }
         require(unit in units && state in states) { "Review the ingredient unit and preparation state." }
         require(grams == null || grams.isFinite() && grams > 0 && grams <= 100000) { "Invalid gram estimate." }
@@ -24,7 +24,7 @@ data class KitchenIngredient(
 }
 
 fun canonical(name: String): String {
-    val clean = name.lowercase().trim().replace(Regex("[^a-z0-9 ]"), "").replace(Regex("\\s+"), " ")
+    val clean = name.lowercase().trim().replace(Regex("[^\\p{L}\\p{N} ]"), "").replace(Regex("\\s+"), " ")
     return when (clean) {
         "garbanzo beans", "garbanzo", "chickpea", "chana" -> "chickpeas"
         "tomatoes" -> "tomato"
@@ -38,7 +38,7 @@ fun canonical(name: String): String {
 
 data class MealBrief(
     val servings: Int = 2, val minutes: Int = 30, val style: String = "Surprise me",
-    val avoid: List<String> = emptyList(), val equipment: List<String> = listOf("hob"),
+    val avoid: List<String> = emptyList(), val equipment: List<String> = emptyList(),
     val heat: String = "Mild", val profileConsent: Boolean = false
 ) {
     fun validated(): MealBrief {

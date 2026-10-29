@@ -76,6 +76,37 @@ class GeminiFoodService(
 
     private val candidateModels = listOf("gemini-3.8-flash")
 
+    /** Shares provider authentication and model selection with every existing meal operation. */
+    suspend fun generateKitchenJson(prompt: String, images: List<Bitmap>, apiKey: String): JSONObject = withContext(Dispatchers.IO) {
+        require(prompt.length in 1..32000 && images.size <= 3) { "This kitchen request is too large." }
+        if (!usesVertex && apiKey.isBlank()) error("Add your AI Studio key or unlock Vertex AI in AI settings.")
+        val parts = JSONArray().put(JSONObject().put("text", prompt))
+        var encodedSize = 0
+        images.forEach { bitmap ->
+            when(val validation = FoodImageValidator.preValidateBitmap(bitmap)) {
+                is ValidationOutcome.Rejected -> throw NonFoodException(validation.message)
+                is ValidationOutcome.Ambiguous -> throw AmbiguousFoodException(validation.message, validation.confidence)
+                else -> Unit
+            }
+            val encoded = bitmapToBase64(bitmap)
+            encodedSize += encoded.length
+            require(encodedSize <= 3_600_000) { "Use fewer or smaller ingredient photos." }
+            parts.put(JSONObject().put("inlineData", JSONObject().put("mimeType", "image/jpeg").put("data", encoded)))
+        }
+        val request = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", parts)))
+            .put("generationConfig", JSONObject().put("responseMimeType", "application/json").put("maxOutputTokens", 4096))
+        executeRequest(request, modelsForProvider.single(), apiKey).use { response ->
+            if (!response.isSuccessful) error(when(response.code) { 429 -> "AI quota reached. Please retry shortly."; else -> "AI request failed (${response.code}). Check your selected provider and try again." })
+            val body = response.body?.string() ?: error("The AI response was empty.")
+            require(body.length <= 250000) { "The AI response was too large." }
+            val candidate = JSONObject(body).getJSONArray("candidates").getJSONObject(0)
+            require(candidate.optString("finishReason") == "STOP") { "The response was incomplete. Retry or ask for a smaller set." }
+            val returned = candidate.getJSONObject("content").getJSONArray("parts")
+            val text = (0 until returned.length()).map { returned.getJSONObject(it) }.filterNot { it.optBoolean("thought", false) }.joinToString("") { it.optString("text") }
+            JSONObject(text.trim())
+        }
+    }
+
     /**
      * Converts Bitmap to Base64 JPEG string, resizing to optimal resolution for high-speed upload.
      */
