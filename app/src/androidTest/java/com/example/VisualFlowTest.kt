@@ -35,7 +35,7 @@ class VisualFlowTest {
         keys.setStartupPromptDismissed(true)
         context.getSharedPreferences("kalc_ai_connection", 0).edit().putString("provider", "AI_STUDIO").commit()
         ActivityScenario.launch(MainActivity::class.java).use {
-            compose.onNodeWithText("KalC").assertIsDisplayed()
+            compose.onAllNodesWithText("KalC").onFirst().assertIsDisplayed()
             compose.onNodeWithText("SAMPLE MEAL").assertIsDisplayed()
             compose.onNodeWithTag("scan_meal_button").assertDoesNotExist()
             compose.onNodeWithTag("camera_button").assertIsDisplayed().assertHasClickAction()
@@ -51,7 +51,15 @@ class VisualFlowTest {
             compose.onNodeWithTag("nav_insights").performClick()
             compose.onNodeWithText("A little perspective").assertIsDisplayed()
             capture("redesign-insights")
-            compose.onNodeWithTag("nav_ask_ai").performClick()
+            // The recalculation snackbar temporarily overlays the content footer.
+            compose.waitUntil(10000) {
+                compose.onAllNodesWithText("Recalculated:", substring = true).fetchSemanticsNodes().isEmpty()
+            }
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("ask_ai_action_button"))
+            compose.onNodeWithTag("ask_ai_action_button").performClick()
+            try {
+                compose.waitUntil(10000) { runCatching { compose.onNodeWithTag("ask_ai_input_field").assertIsDisplayed() }.isSuccess }
+            } finally { capture("redesign-chat") }
             compose.onNodeWithTag("ask_ai_input_field").assertIsDisplayed()
             capture("redesign-chat")
             compose.onNodeWithContentDescription("Close").performClick()

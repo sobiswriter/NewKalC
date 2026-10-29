@@ -29,8 +29,8 @@ data class HistoryRow(val id: String, val kind: HistoryKind, val title: String, 
 class HistoryRepository private constructor(context: Context) {
     private val folder = File(context.noBackupFilesDir, "kitchen").apply { check(exists() || mkdirs()) }
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-    private val recordAdapter = moshi.adapter(HistoryRecord::class.java)
-    private val sessionAdapter = moshi.adapter(CookingSession::class.java)
+    private val recordAdapter by lazy { moshi.adapter(HistoryRecord::class.java) }
+    private val sessionAdapter by lazy { moshi.adapter(CookingSession::class.java) }
     private val sessionFile = AtomicFile(File(folder, "cooking-session.json"))
     private val helper = object : SQLiteOpenHelper(context, File(folder, "history.db").absolutePath, null, 1) {
         override fun onCreate(db: SQLiteDatabase) {

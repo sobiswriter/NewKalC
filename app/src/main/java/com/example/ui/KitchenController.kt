@@ -27,7 +27,7 @@ class KitchenController(
     private val accessError: (Throwable) -> Unit
 ) {
     val history = HistoryRepository.get(context)
-    private val ai = KitchenAiService(service)
+    private val ai by lazy { KitchenAiService(service) }
     private val mutable = MutableStateFlow(KitchenUiState())
     val state = mutable.asStateFlow()
     private var job: Job? = null
@@ -53,7 +53,7 @@ class KitchenController(
             finally { if(version==revision) mutable.update { it.copy(busy=null) } }
         }
     }
-    private suspend fun <T> io(work: () -> T): T = withContext(Dispatchers.IO) { work() }
+    private suspend fun <T> io(work: suspend () -> T): T = withContext(Dispatchers.IO) { work() }
     fun go(page: String) { cancel(); mutable.update { it.copy(page=page,error=null,notice=null) }; if(page=="history" || page=="home") refreshHistory() }
     fun dismiss() { mutable.update { it.copy(error=null,notice=null) } }
     fun setGroup(group: RecipeGroup) { mutable.update { it.copy(group=group) } }
@@ -63,7 +63,7 @@ class KitchenController(
         val images=state.value.photos
         if(images.isEmpty()) { mutable.update { it.copy(error="Add an ingredient photo first, or enter ingredients by hand.") }; return }
         task("Looking at your ingredients…") {
-            val ingredients=ai.recognize(images,apiKey())
+            val ingredients=io { ai.recognize(images,apiKey()) }
             currentCoroutineContext().ensureActive()
             mutable.update { it.copy(pantry=ingredients,confirmed=false,recipes=emptyList(),page="ingredients") }
         }
@@ -90,7 +90,7 @@ class KitchenController(
         val s=state.value
         if(!s.confirmed) { mutable.update { it.copy(page="ingredients",error="Confirm your pantry first.") }; return }
         task("Finding possibilities for your kitchen…") {
-            val suggestions=ai.suggest(s.pantry,s.brief,profile(),apiKey(),if(more)s.recipes.map { it.title } else emptyList())
+            val suggestions=io { ai.suggest(s.pantry,s.brief,profile(),apiKey(),if(more)s.recipes.map { it.title } else emptyList()) }
             currentCoroutineContext().ensureActive()
             mutable.update { it.copy(recipes=(if(more)it.recipes else emptyList())+suggestions,page="results") }
         }
@@ -103,7 +103,7 @@ class KitchenController(
     fun openRecipe(summary: RecipeSummary) {
         cookbookCache[summary.id]?.let { recipe -> mutable.update { it.copy(selected=recipe,proposed=null,messages=emptyList(),page="detail") }; return }
         task("Opening your cookbook…") {
-            val recipe=ai.detail(summary,apiKey())
+            val recipe=io { ai.detail(summary,apiKey()) }
             currentCoroutineContext().ensureActive()
             cookbookCache[summary.id]=recipe
             mutable.update { it.copy(selected=recipe,proposed=null,messages=emptyList(),page="detail") }
@@ -169,7 +169,7 @@ class KitchenController(
         val s=state.value; val recipe=s.selected?:return
         task("Thinking through your cooking question…") {
             val step=s.session?.takeIf {it.recipe.version==recipe.version}?.step?:0
-            val answer=ai.chat(recipe,s.brief,step,question,profile(),apiKey())
+            val answer=io { ai.chat(recipe,s.brief,step,question,profile(),apiKey()) }
             currentCoroutineContext().ensureActive()
             mutable.update { it.copy(messages=(it.messages+listOf(true to question,false to answer)).takeLast(24)) }
         }
@@ -177,7 +177,7 @@ class KitchenController(
     fun propose(request: String) {
         val recipe=state.value.selected?:return
         task("Checking a revised version…") {
-            val proposal=ai.revise(recipe,request,apiKey(),state.value.brief,profile())
+            val proposal=io { ai.revise(recipe,request,apiKey(),state.value.brief,profile()) }
             currentCoroutineContext().ensureActive()
             require(RecipeMatcher.match(proposal.summary,state.value.pantry,state.value.brief).blocked.isEmpty()) { "This proposal conflicts with your food restrictions or equipment. Try a different change." }
             mutable.update { it.copy(proposed=proposal) }
@@ -219,7 +219,7 @@ class KitchenController(
         mutable.update {it.copy(historyRecord=scan,linkedScans=emptyList(),page="historyDetail")}
         task("Reviewing this cooking result…") {
             val cooked=io { scan.linkedCookedId?.let { history.get(it) } }?:error("Save and link a cooked meal first.")
-            val review=ai.review(cooked,scan,apiKey())
+            val review=io { ai.review(cooked,scan,apiKey()) }
             currentCoroutineContext().ensureActive()
             val updated=io { history.save(scan.copy(review=review)) }
             mutable.update { it.copy(historyRecord=updated,page="historyDetail",notice="Cooking review saved. Photo observations are estimates.") }
