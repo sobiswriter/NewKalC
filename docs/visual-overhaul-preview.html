@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KalC — Visual direction</title>
+<style>
+  :root { color-scheme:light; --paper:#f6f3eb; --white:#fffefa; --ink:#183d30; --muted:#626b5c; --line:#d5d9cc; --lime:#dde9a8; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#e9e9df; color:var(--ink); font:15px/1.5 system-ui,sans-serif; }
+  button,input { font:inherit; }
+  button { cursor:pointer; color:inherit; }
+  button:focus-visible,input:focus-visible { outline:3px solid #547e25; outline-offset:3px; }
+  button:disabled { cursor:default; opacity:.6; }
+  .board { max-width:1160px; margin:auto; padding:56px 32px; display:grid; grid-template-columns:1fr 410px; gap:88px; align-items:start; }
+  .direction { position:sticky; top:56px; padding-top:24px; }
+  .eyebrow { text-transform:uppercase; letter-spacing:.17em; font-size:11px; font-weight:700; }
+  .direction h1 { font:normal clamp(48px,6vw,76px)/1.03 Georgia,serif; letter-spacing:-.055em; margin:30px 0 24px; }
+  .direction p { max-width:380px; color:var(--muted); font-size:16px; }
+  .direction .rule { width:44px; height:3px; background:var(--ink); margin:32px 0; }
+  .chips { display:flex; gap:10px; margin:28px 0; }
+  .swatch { width:38px; height:38px; border:1px solid #b2b8a8; border-radius:50%; }
+  .direction small { display:block; max-width:360px; color:var(--muted); margin-top:28px; }
+  .phone { background:var(--paper); border:7px solid #233c30; border-radius:44px; overflow:hidden; box-shadow:0 24px 60px #16322518; }
+  .statusbar { display:flex; justify-content:space-between; padding:13px 24px 0; font-size:12px; font-weight:650; }
+  .top { display:flex; align-items:center; justify-content:space-between; padding:15px 22px 18px; }
+  .brand { font:italic 32px Georgia,serif; letter-spacing:-2px; }
+  .connection { border:1px solid var(--line); border-radius:24px; padding:8px 12px; min-height:48px; background:transparent; font-size:11px; display:flex; align-items:center; gap:7px; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#8d4d17; }
+  .content { min-height:670px; }
+  .panel[hidden] { display:none; }
+  .intro { padding:0 22px 18px; }
+  .intro h2 { font:normal 31px/1.15 Georgia,serif; letter-spacing:-1px; margin:6px 0; }
+  .intro p { color:var(--muted); font-size:12px; margin:7px 0 0; }
+  .image { position:relative; height:225px; margin:0 14px; border-radius:22px; overflow:hidden; background:#d2d1ba; }
+  .image img { width:100%; height:100%; object-fit:cover; }
+  .sample { position:absolute; top:12px; left:12px; background:var(--paper); border-radius:20px; padding:5px 10px; font-size:10px; font-weight:600; }
+  .image-label { position:absolute; bottom:0; left:0; right:0; padding:35px 16px 14px; background:linear-gradient(transparent,#071c13dc); color:#fff; font-size:12px; }
+  .nutrition { margin:0 22px; padding:20px 0 18px; border-bottom:1px solid var(--line); }
+  .nutrition .summary { display:flex; justify-content:space-between; align-items:center; }
+  .energy { font-size:54px; font-weight:450; letter-spacing:-3px; line-height:1.1; }
+  .energy span { font-size:16px; letter-spacing:0; margin-left:5px; }
+  .estimate { font-size:10px; color:var(--muted); }
+  .portion { border:1px solid var(--line); border-radius:24px; background:transparent; padding:7px 13px; min-height:48px; font-size:11px; }
+  .macrogrid { display:grid; grid-template-columns:repeat(3,1fr); margin-top:20px; gap:12px; }
+  .macro { border-left:2px solid #8f997a; padding-left:10px; }
+  .macro:nth-child(2) { border-color:#ae924e; }
+  .macro:nth-child(3) { border-color:#a3775e; }
+  .macro b { font-size:17px; font-weight:600; }
+  .macro small { display:block; font-size:10px; color:var(--muted); }
+  .breakdown { padding:18px 22px 8px; }
+  .section-title { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .section-title h3 { font:normal 22px Georgia,serif; margin:0; letter-spacing:-.5px; }
+  .section-title small { font-size:10px; color:var(--muted); }
+  .food { display:grid; grid-template-columns:32px 1fr auto; gap:10px; align-items:center; padding:12px 0; border-bottom:1px solid var(--line); }
+  .food:last-child { border:0; }
+  .food-icon { width:31px; height:31px; display:grid; place-items:center; background:#e7e8d8; border-radius:50%; font:italic 17px Georgia,serif; }
+  .food b { display:block; font-size:12px; font-weight:600; }
+  .food small { color:var(--muted); font-size:10px; }
+  .food .cal { text-align:right; font-size:12px; }
+  .scan { display:block; width:calc(100% - 44px); margin:8px 22px 16px; border:0; background:var(--ink); color:var(--white); border-radius:14px; min-height:50px; font-weight:600; font-size:13px; }
+  .scan span { margin-right:8px; font-size:20px; vertical-align:-1px; font-weight:400; }
+  .nav { padding:9px 16px 12px; border-top:1px solid var(--line); display:grid; grid-template-columns:repeat(3,1fr); gap:5px; background:var(--white); }
+  .nav button { background:transparent; border:0; min-height:51px; border-radius:12px; font-size:10px; }
+  .nav button[aria-selected=true] { background:var(--lime); }
+  .nav svg { display:block; margin:2px auto 3px; width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.6; }
+  .note { text-align:center; color:var(--muted); font-size:11px; margin-top:20px; }
+  .inner { padding:4px 22px 22px; }
+  .insight-hero { background:var(--ink); color:var(--white); padding:25px; border-radius:22px; margin-bottom:25px; }
+  .insight-hero h3 { font:normal 28px/1.18 Georgia,serif; margin:12px 0; letter-spacing:-.6px; }
+  .insight-hero p { color:#dce3d5; font-size:12px; }
+  .observation { border-bottom:1px solid var(--line); padding:19px 0; }
+  .observation .number { font:italic 20px Georgia,serif; color:#6e785a; }
+  .observation h3 { font-size:14px; margin:5px 0; }
+  .observation p { color:var(--muted); font-size:12px; margin:4px 0; }
+  .local-note { color:var(--muted); font-size:10px; padding-top:20px; }
+  .context { background:#e7eadb; padding:12px 16px; border-radius:14px; font-size:11px; margin-bottom:25px; }
+  .bubble { border:1px solid var(--line); background:var(--white); padding:17px; border-radius:18px 18px 18px 3px; font-size:13px; line-height:1.7; }
+  .prompt { width:100%; background:transparent; border:1px solid var(--line); border-radius:12px; text-align:left; min-height:48px; margin-top:12px; padding:10px 14px; font-size:12px; }
+  .composer { margin-top:35px; display:flex; gap:8px; }
+  .composer input { width:100%; min-width:0; background:var(--white); border:1px solid var(--line); border-radius:14px; padding:12px; font-size:12px; }
+  .composer button { width:48px; flex-shrink:0; border:0; border-radius:14px; background:var(--ink); color:white; }
+  .settings-copy { color:var(--muted); font-size:12px; }
+  .provider { display:block; width:100%; margin:15px 0 0; background:var(--white); text-align:left; padding:18px; border:1px solid var(--line); border-radius:16px; }
+  .provider[aria-pressed=true] { border:2px solid var(--ink); padding:17px; }
+  .provider b { display:block; font-size:14px; }
+  .provider small { display:block; margin-top:4px; color:var(--muted); font-size:11px; }
+  .provider em { font-size:10px; font-style:normal; background:var(--lime); border-radius:10px; padding:3px 7px; float:right; }
+  .auth-preview { margin:22px 0; padding:20px; background:#e7eadb; border-radius:16px; }
+  .auth-preview h3 { font:normal 22px Georgia,serif; margin:0 0 9px; }
+  .auth-preview p { margin:0; font-size:12px; color:var(--muted); }
+  .auth-preview .placeholder { background:var(--white); border:1px solid var(--line); padding:13px; border-radius:10px; margin-top:16px; font-size:12px; }
+  .back { min-height:48px; border:0; background:transparent; padding:5px 0; font-size:12px; }
+  #announcement { padding:0 22px 12px; font-size:11px; color:var(--muted); }
+  @media(max-width:850px) { .board { max-width:650px; grid-template-columns:1fr; gap:36px; padding:30px 18px; } .direction { position:static; padding:0; } .direction h1 { font-size:53px; margin:20px 0; } .direction .rule,.direction .chips,.direction small { display:none; } .phone-wrap { max-width:410px; width:100%; justify-self:center; } }
+  @media(prefers-reduced-motion:no-preference) { button { transition:background .16s ease; } button:hover { filter:brightness(.96); } }
+</style>
+</head>
+<body>
+<main class="board">
+  <aside class="direction">
+    <div class="eyebrow">KalC / Design study 01</div>
+    <h1>Know your plate.<br>Find your balance.</h1>
+    <p>A quieter, more considered KalC. Food first. Clear estimates. Useful guidance, one meal at a time.</p>
+    <div class="rule"></div>
+    <p>Warm ivory. Forest green. A little citrus.<br>Familiar tools, with room to breathe.</p>
+    <div class="chips" aria-label="Proposed color palette"><span class="swatch" style="background:#183d30" title="Forest"></span><span class="swatch" style="background:#f6f3eb" title="Ivory"></span><span class="swatch" style="background:#dde9a8" title="Citrus"></span><span class="swatch" style="background:#ae924e" title="Grain"></span></div>
+    <small>Interactive design proposal. Explore the tabs, adjust the sample portion, or open the provider pill. All content is a local sample; cloud access is not connected.</small>
+  </aside>
+  <div class="phone-wrap">
+  <section class="phone" aria-label="KalC mobile design prototype">
+    <div class="statusbar"><span>9:41</span><span aria-label="Network and battery">5G ▰</span></div>
+    <header class="top"><div class="brand" aria-label="KalC">kalc.</div><button class="connection" id="connection"><span class="dot"></span><span id="connection-label">Vertex AI · Locked</span><span aria-hidden="true">⌄</span></button></header>
+    <div class="content">
+      <section class="panel" id="meal" role="tabpanel" aria-labelledby="tab-meal">
+        <div class="intro"><div class="eyebrow">A little clarity, every meal</div><h2>Your plate, understood.</h2><p>A closer look at what's keeping you going.</p></div>
+        <div class="image"><img src="images/sample_thali.jpg" alt="Sample Indian thali with rice, dal, vegetables, and salad"><span class="sample">SAMPLE MEAL</span><div class="image-label">Indian thali <span aria-hidden="true">·</span> 4 foods</div></div>
+        <div class="nutrition"><div class="summary"><div><div class="estimate">Estimated energy</div><div class="energy"><output id="calories">518</output><span>kcal</span></div></div><button class="portion" id="portion">Adjust portion ↗</button></div><div class="macrogrid"><div class="macro"><b><output id="protein">16.1</output>g</b><small>Protein</small></div><div class="macro"><b><output id="carbs">94.9</output>g</b><small>Carbs</small></div><div class="macro"><b><output id="fat">8.6</output>g</b><small>Fat</small></div></div></div>
+        <section class="breakdown"><div class="section-title"><h3>On your plate</h3><small id="portion-label">Original portions</small></div><div id="foods"></div></section>
+        <button class="scan" id="scan"><span aria-hidden="true">⊕</span> Scan a meal</button>
+      </section>
+      <section class="panel" id="insights" role="tabpanel" aria-labelledby="tab-insights" hidden>
+        <div class="intro"><div class="eyebrow">The bigger picture</div><h2>Small shifts. Good balance.</h2><p>Sample guidance, grounded in this plate.</p></div>
+        <div class="inner"><div class="insight-hero"><div class="eyebrow">One useful takeaway</div><h3>A varied plate.<br>Room for more protein.</h3><p>Rice, lentils, vegetables, and salad bring variety. A protein-rich side could make this meal more filling.</p></div><div class="observation"><span class="number">01</span><h3>Keep the variety.</h3><p>Several food groups make it easier to build a satisfying meal.</p></div><div class="observation"><span class="number">02</span><h3>Make a small addition.</h3><p>Consider yogurt, tofu, or another serving of lentils if it suits your preferences.</p></div><div class="observation"><span class="number">03</span><h3>Portions tell part of the story.</h3><p>Cooking oil and preparation change the estimate. Adjust what you know.</p></div><div class="local-note">Illustrative sample guidance. Food analysis is an estimate, not medical advice.</div></div>
+      </section>
+      <section class="panel" id="chat" role="tabpanel" aria-labelledby="tab-chat" hidden>
+        <div class="intro"><div class="eyebrow">A conversation about your food</div><h2>A little food for thought.</h2><p>Ask with your actual meal in mind.</p></div>
+        <div class="inner"><div class="context">CURRENT CONTEXT <strong>Indian thali · 4 foods</strong></div><div class="bubble" id="reply">What would you like to understand about this plate? Try a question below to explore the proposed chat experience.</div><button class="prompt" data-prompt="protein">How could I add more protein? ↗</button><button class="prompt" data-prompt="portion">What changes if I reduce the portion? ↗</button><form class="composer" id="chat-form"><input id="question" aria-label="Sample question about the meal" placeholder="Ask about this meal…" maxlength="500"><button aria-label="Preview response" type="submit">↑</button></form><div class="local-note">Design preview. Responses are local examples, not generated by AI.</div></div>
+      </section>
+      <section class="panel" id="settings" aria-label="AI connection preview" hidden>
+        <div class="intro"><button class="back" id="back">← Back to your meal</button><div class="eyebrow">Your AI connection</div><h2>Choose what powers KalC.</h2></div>
+        <div class="inner"><p class="settings-copy">A protected cloud connection, or your own API key. You stay in control.</p><button class="provider" id="vertex" aria-pressed="true"><em>PRIMARY</em><b>Vertex AI</b><small>Google Cloud · On Sundays</small></button><button class="provider" id="studio" aria-pressed="false"><b>Google AI Studio</b><small>Connect with your own API key</small></button><div class="auth-preview"><h3 id="auth-title">Unlock On Sundays</h3><p id="auth-copy">The shared passkey is verified by the server. Your Google Cloud credentials stay off this device.</p><div class="placeholder" id="auth-field">Password-protected connection</div><button class="scan" id="auth-action" style="width:100%;margin:16px 0 0">Preview unlock</button></div><p class="settings-copy">Switching providers keeps your meal and saved key. A failed request never silently changes your provider.</p><div class="local-note">This preview does not collect passwords or API keys. Vertex uses a shared server passkey; no account is required.</div></div>
+      </section>
+    </div>
+    <div id="announcement" role="status" aria-live="polite"></div>
+    <nav class="nav" role="tablist" aria-label="Meal views">
+      <button id="tab-meal" role="tab" aria-selected="true" aria-controls="meal" data-view="meal"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M2 3v7m3-7v7M2 7h3m-1.5 3v11M21 3v18m0-18c-4 0-4 8 0 8"/></svg>Meal</button>
+      <button id="tab-insights" role="tab" aria-selected="false" aria-controls="insights" data-view="insights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V12m8 8V4m8 16v-9"/></svg>Insights</button>
+      <button id="tab-chat" role="tab" aria-selected="false" aria-controls="chat" data-view="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z"/><path d="M8 8h8m-8 5h5"/></svg>Ask AI</button>
+    </nav>
+  </section>
+  <p class="note">DESIGN PROPOSAL · SAMPLE CONTENT · NO CLOUD CALLS</p>
+  </div>
+</main>
+<script>
+  const foods = [
+    { name:'Basmati rice', grams:180, calories:130, protein:2.7, carbs:28.2, fat:.3, initial:'r' },
+    { name:'Dal tadka', grams:150, calories:95.3, protein:5.2, carbs:16.5, fat:2.5, initial:'d' },
+    { name:'Aloo sabzi', grams:120, calories:110, protein:2.4, carbs:14.5, fat:3.5, initial:'a' },
+    { name:'Fresh salad', grams:50, calories:18, protein:.9, carbs:3.8, fat:.2, initial:'s' }
+  ];
+  const byId = id => document.getElementById(id);
+  const totals = scale => foods.reduce((sum,food) => {
+    for (const key of ['calories','protein','carbs','fat']) {
+      const precision=key==='calories'?1:10;
+      sum[key] += Math.round(food.grams * scale / 100 * food[key] * precision)/precision;
+    }
+    return sum;
+  }, {calories:0,protein:0,carbs:0,fat:0});
+  let scale=1;
+  let provider='vertex';
+  function renderMeal() {
+    const total=totals(scale);
+    byId('calories').textContent=Math.round(total.calories);
+    for (const key of ['protein','carbs','fat']) byId(key).textContent=total[key].toFixed(1);
+    byId('foods').replaceChildren(...foods.map(food => {
+      const row=document.createElement('div');
+      row.className='food';
+      const icon=document.createElement('span'); icon.className='food-icon'; icon.textContent=food.initial; icon.setAttribute('aria-hidden','true');
+      const details=document.createElement('div');
+      const name=document.createElement('b'); name.textContent=food.name;
+      const weight=document.createElement('small'); weight.textContent=`${Math.round(food.grams*scale)} g · Sample reference`;
+      details.append(name,weight);
+      const energy=document.createElement('div'); energy.className='cal'; energy.textContent=`${Math.round(food.grams*scale/100*food.calories)} kcal`;
+      row.append(icon,details,energy); return row;
+    }));
+    byId('portion-label').textContent=scale===1?'Original portions':'75% of original';
+    byId('portion').textContent=scale===1?'Adjust portion ↗':'Reset portion ↗';
+  }
+  function show(view) {
+    document.querySelectorAll('.panel').forEach(panel => panel.hidden=panel.id!==view);
+    document.querySelectorAll('[data-view]').forEach(tab => tab.setAttribute('aria-selected',String(tab.dataset.view===view)));
+    byId('announcement').textContent='';
+  }
+  function selectProvider(next) {
+    provider=next;
+    for (const key of ['vertex','studio']) byId(key).setAttribute('aria-pressed',String(key===provider));
+    byId('connection-label').textContent=provider==='vertex'?'Vertex AI · Locked':'AI Studio · No key';
+    byId('auth-title').textContent=provider==='vertex'?'Unlock On Sundays':'Bring your own API key';
+    byId('auth-copy').textContent=provider==='vertex'?'The shared passkey is verified by the server. Your Google Cloud credentials stay off this device.':'Your AI Studio key connects directly to Google. It stays separate from the On Sundays cloud login.';
+    byId('auth-field').textContent=provider==='vertex'?'Password-protected connection':'Masked API-key input';
+    byId('auth-action').textContent=provider==='vertex'?'Preview unlock':'Preview key connection';
+  }
+  document.querySelectorAll('[data-view]').forEach(tab => tab.addEventListener('click',()=>show(tab.dataset.view)));
+  const tabs=Array.from(document.querySelectorAll('[role=tab]'));
+  tabs.forEach((tab,index)=>tab.addEventListener('keydown',event=>{
+    if (!['ArrowRight','ArrowLeft','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length;
+    show(tabs[next].dataset.view); tabs[next].focus();
+  }));
+  byId('connection').onclick=()=>show('settings');
+  byId('back').onclick=()=>show('meal');
+  byId('portion').onclick=()=>{scale=scale===1?.75:1;renderMeal();byId('announcement').textContent='Sample portions and nutrition updated.';};
+  byId('scan').onclick=()=>{byId('announcement').textContent='Design preview: the Android app will open camera or gallery here.';};
+  for (const next of ['vertex','studio']) byId(next).onclick=()=>selectProvider(next);
+  byId('auth-action').onclick=()=>{byId('announcement').textContent='Presentation preview only. No credentials collected and no connection made.';};
+  const replies={protein:'Sample answer: Add a protein-rich side such as yogurt, tofu, or extra lentils. Add it to your meal to see the updated estimate.',portion:'Sample answer: A smaller portion reduces the estimated calories and macros proportionally. Try “Adjust portion” on the Meal tab.'};
+  document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{byId('reply').textContent=replies[button.dataset.prompt];});
+  byId('chat-form').onsubmit=event=>{event.preventDefault();if(byId('question').value.trim()){byId('reply').textContent='This is a local design preview. In the app, your selected AI provider will answer using your current meal context.';byId('question').value='';}};
+  function check(condition,message) { if(!condition) throw new Error(message); }
+  check(Math.round(totals(1).calories)===518,'Sample calorie fixture');
+  check(totals(.75).calories===389,'Portion recalculation sums displayed food calories');
+  check(tabs.every(tab=>byId(tab.dataset.view)),'Every tab has a panel');
+  renderMeal();
+  document.documentElement.dataset.selfCheck='passed';
+</script>
+</body>
+</html>
