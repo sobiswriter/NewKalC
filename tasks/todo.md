@@ -37,7 +37,17 @@
 - [x] Deploy reviewed service; verify denied access plus one authorized Vertex call.
 - [x] Exercise all four Vertex AI paths live; verify Studio selection and key preservation. A live Studio API call requires the user's own valid key and was not performed.
 
-## 4. Visual overhaul proposal delivered; implementation is future work
+## Completed follow-up — 2026-10-29
+
+- [x] Use only Gemini 3.8 Flash on both providers, including key validation; set LOW thinking.
+- [x] Rotate the owner-requested passkey plus session signing key and deploy revision 00007.
+- [x] Retain food guards; fail closed on malformed validation fields; test both scan paths.
+- [x] Run image decoding/validation off the main thread; record live and release startup timings.
+- [x] Pass 10 backend tests, 16 Android unit tests, two emulator instrumentation tests, and live food/non-food checks.
+- [x] Build and signature-verify non-debug release 1.1, install/start it, and copy the APK to Downloads.
+- [x] Update installation, model, credentials, performance, and verification documentation.
+
+## Visual proposal implementation (future work)
 
 - [x] Deliver and browser-verify `docs/visual-overhaul-preview.html` with `docs/UI_OVERHAUL_PLAN.md`.
 - [ ] Translate accepted design into existing Compose components; retain current editing/validation features.

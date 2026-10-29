@@ -3,7 +3,11 @@
 
 **AI connections:** In **API Key & AI Settings**, choose **Vertex AI server** to use the On Sundays backend with its shared passkey, or **AI Studio** to use your own Google API key. A wrong passkey grants no server access. Switching providers keeps your Studio key and locks the Vertex session. Server sessions last up to 12 hours and are cleared when the app process exits. Google usage charges and quotas apply to the chosen provider.
 
-Owner setup, backend checks, deployment, and passkey handling are documented in [server/README.md](server/README.md). The proposed visual refresh is in [docs/UI_OVERHAUL_PLAN.md](docs/UI_OVERHAUL_PLAN.md), with an interactive [design preview](docs/visual-overhaul-preview.html).
+**Version 1.1:** All AI operations on both providers use **Gemini 3.8 Flash** with LOW thinking; there is no fallback to another model. Local food validation and deterministic nutrition arithmetic remain in place. Missing validation fields, non-food, unclear/low-confidence images, and empty detections cannot produce an accepted meal. Image decoding and validation run away from the UI thread, and the meal appears while insights load separately.
+
+**Install on your phone:** Open `KalC-v1.1.apk` from your phone's Downloads or messaging/files app, allow **Install unknown apps / Allow from this source** if Android asks, then tap **Install**. No USB cable, developer options, or USB debugging is needed. The signed, non-debug APK is built at `app/build/outputs/apk/release/app-release.apk`; an owner copy is in Windows `Downloads/KalC-v1.1.apk`. If an earlier debug build is installed, Android requires uninstalling that build first because the release certificate differs; this removes that build's saved settings. Future APKs signed with the same private release key update normally.
+
+Owner setup, backend checks, deployment, passkey handling, and private release signing are documented in [server/README.md](server/README.md). See [verification and measured timings](docs/MIGRATION_VERIFICATION.md). The proposed visual refresh is in [docs/UI_OVERHAUL_PLAN.md](docs/UI_OVERHAUL_PLAN.md), with an interactive [design preview](docs/visual-overhaul-preview.html).
 
 <p align="center">
   <img src="docs/images/app_logo.jpg" alt="KalC App Logo" width="100" style="border-radius: 20px;"/>
@@ -191,7 +195,7 @@ Even when network connectivity is lost or an API rate limit is reached, KalC inc
 <details>
 <summary><b>Q3: What prevents the app from generating calories if I upload a selfie or a shoe?</b></summary>
 <br>
-<i>"We implemented a dual-tier Food Validation Gate. An on-device Haar/AdaBoost FaceDetector immediately catches human portraits locally in under 50ms, while the vision model evaluates an explicit food classification confidence score ($S_{food}$). If the image contains no recognizable food, the system aborts before calculating any calories."</i>
+<i>"We implemented a dual-tier Food Validation Gate. An on-device FaceDetector checks human portraits locally in a background worker, while the vision model evaluates an explicit food classification confidence score ($S_{food}$). If the image contains no recognizable food, or its food validation fields are missing or invalid, the system aborts before accepting a meal. Runtime varies by device; the local heuristic does not replace model validation."</i>
 </details>
 
 <details>

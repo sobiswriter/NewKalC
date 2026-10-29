@@ -48,6 +48,7 @@ test('valid passkey unlocks generation with bounded output and no secret in resp
   assert.ok(text.includes('4096'));
   const forwarded = JSON.parse(JSON.parse(text).candidates[0].content.parts[0].text);
   assert.equal(forwarded.contents[0].role, 'user');
+  assert.deepEqual(forwarded.generationConfig.thinkingConfig, { thinkingLevel: 'LOW' });
   assert.ok(!text.includes(config.sessionKey));
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(f.calls(), 1);

@@ -2,7 +2,7 @@
 
 The Android app offers **Vertex AI server** and **Google AI Studio**. Only Vertex requires the shared server passkey. AI Studio requests go directly to Google with the user's own key. Google API charges and quotas still apply to the selected provider.
 
-The Vertex backend defaults to `gemini-3.1-flash-lite` in the `global` location. Live comparison with the project's thali image returned complete food JSON in about 4.5 seconds; `gemini-3.8-flash` intermittently exceeded the server deadline. The server owns model selection, so this can be changed without shipping a new APK. Image requests receive a bounded 4096-token budget to avoid truncated food JSON from legacy client limits.
+The Vertex backend uses `gemini-3.8-flash` in `global`, with server-enforced LOW thinking. AI Studio uses that same model and thinking level for photo analysis, side dishes, insights, chat, and key validation. No request silently falls back to another model. Image requests receive a bounded 4096-token budget to avoid truncated food JSON. See [live verification and timings](../docs/MIGRATION_VERIFICATION.md); these samples are measurements, not a latency guarantee. LOW is supported by [Google's 3.8 Flash guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash); MINIMAL is not supported.
 
 ## Contract
 
@@ -41,6 +41,23 @@ This makes the HTTP service reachable by phones. **It does not bypass the server
 
 The deployment uses one instance and scale-to-zero. Per-process throttling is a baseline abuse control (10 session attempts/minute, 60 AI requests/minute); restarts and overlapping revisions reset/duplicate those counters. A shared limiter or an edge policy is required before scaling or wider public distribution. Output is capped at 4096 tokens and incoming requests at 4 MB. Vertex requests time out after 55 seconds. These controls reduce exposure but are not a hard billing cap; anyone you share the passkey with can incur usage in On Sundays.
 
-To revoke all sessions and rotate the passkey, generate a new owner configuration with a fresh signing key, upload a new Secret Manager version, and deploy a new revision; drain the old revision. Keep the owner secret files private and back them up securely. Logs omit request bodies, credentials, and upstream error details.
+To revoke all sessions and rotate the passkey, generate a new owner configuration with a fresh signing key, upload a new Secret Manager version, and deploy a new revision; drain the old revision. The owner's requested passkey was applied on 2026-10-29 with a fresh salt and signing key (Secret Manager version 3); its plaintext stays outside Git. This invalidates previous sessions. Keep the owner secret files private and back them up securely. Logs omit request bodies, credentials, and upstream error details.
+
+## Signed APK installation
+
+The release APK is non-debuggable and not test-only. Copy `KalC-v1.1.apk` to a phone and open it with Files/Downloads; approve Android's one-time installation permission for that source. USB debugging is unnecessary. Android 7.0 or later is required. This is APK distribution, not a Play Store listing.
+
+The owner release certificate/key is stored in `%LOCALAPPDATA%/KalC/kalc-release.jks`, with private signing settings in `release-signing.json` in that directory. Back up both privately: future updates must use this certificate. Do not commit or share them. To reproduce the release in PowerShell:
+
+```powershell
+$signing = Get-Content "$env:LOCALAPPDATA/KalC/release-signing.json" -Raw | ConvertFrom-Json
+$env:KEYSTORE_PATH = $signing.path
+$env:STORE_PASSWORD = $signing.password
+$env:KEY_PASSWORD = $signing.password
+./gradlew.bat testDebugUnitTest assembleRelease
+Remove-Item Env:KEYSTORE_PATH, Env:STORE_PASSWORD, Env:KEY_PASSWORD
+```
+
+An older debug APK has a different certificate: uninstall it before installing this release (its saved settings are removed). Subsequent releases signed with the owner key update normally. The shared server passkey is never embedded in either APK.
 
 References: [Cloud Run service identity](https://docs.cloud.google.com/run/docs/securing/service-identity), [Secret Manager integration](https://docs.cloud.google.com/run/docs/configuring/services/secrets), [Vertex generateContent](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference).

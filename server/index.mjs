@@ -48,14 +48,15 @@ function validatePayload(payload) {
       (settings.maxOutputTokens !== undefined && (!Number.isInteger(settings.maxOutputTokens) || settings.maxOutputTokens < 1)) ||
       (settings.responseMimeType !== undefined && !['application/json', 'text/plain'].includes(settings.responseMimeType))) throw fail(400, 'Invalid generation settings.');
   const hasImage = payload.contents.some(content => content.parts.some(part => part.inlineData));
+  delete settings.temperature;
   return {
     contents: payload.contents.map(content => ({ ...content, role: content.role ?? 'user' })),
     // Vision analysis needs room for reasoning and the complete food JSON, including legacy 1024-token requests.
-    generationConfig: { ...settings, maxOutputTokens: hasImage ? 4096 : Math.min(settings.maxOutputTokens ?? 4096, 4096) }
+    generationConfig: { ...settings, maxOutputTokens: hasImage ? 4096 : Math.min(settings.maxOutputTokens ?? 4096, 4096), thinkingConfig: { thinkingLevel: 'LOW' } }
   };
 }
 
-export function createHandler({ config, project, model = 'gemini-3.1-flash-lite', generate, now = Date.now }) {
+export function createHandler({ config, project, model = 'gemini-3.8-flash', generate, now = Date.now }) {
   if (!config || !/^[a-f0-9]{32}$/.test(config.salt) || !/^[a-f0-9]{128}$/.test(config.hash) ||
       typeof config.sessionKey !== 'string' || config.sessionKey.length < 32) throw new Error('Valid server authentication configuration is required.');
   if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(project ?? '') || !/^gemini-[a-z0-9.-]+$/.test(model)) throw new Error('Invalid Vertex configuration.');
@@ -144,7 +145,7 @@ export function createHandler({ config, project, model = 'gemini-3.1-flash-lite'
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = JSON.parse(process.env.AUTH_CONFIG ?? '{}');
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000, maxHeaderSize: 8192 }, createHandler({
-    config, project: process.env.GOOGLE_CLOUD_PROJECT, model: process.env.VERTEX_MODEL ?? 'gemini-3.1-flash-lite'
+    config, project: process.env.GOOGLE_CLOUD_PROJECT, model: process.env.VERTEX_MODEL ?? 'gemini-3.8-flash'
   }));
   server.listen(Number(process.env.PORT ?? 8080), '0.0.0.0');
 }

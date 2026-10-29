@@ -30,21 +30,29 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-class GeminiFoodService(private val vertexAccess: VertexAccessRepository? = null) {
-
-    private val client = OkHttpClient.Builder()
+class GeminiFoodService(
+    private val vertexAccess: VertexAccessRepository? = null,
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
         .readTimeout(75, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+) {
 
     private val usesVertex: Boolean get() = vertexAccess?.provider == AiProvider.VERTEX
     private val modelsForProvider: List<String> get() = if (usesVertex) listOf("vertex") else candidateModels
 
     private fun executeRequest(payload: JSONObject, model: String, apiKey: String): Response {
         val vertex = model == "vertex"
+        if (!vertex) {
+            val settings = payload.optJSONObject("generationConfig") ?: JSONObject()
+            settings.put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW"))
+            settings.remove("temperature")
+            if (!settings.has("maxOutputTokens")) settings.put("maxOutputTokens", 4096)
+            payload.put("generationConfig", settings)
+        }
         val request = if (vertex) {
             vertexAccess!!.generationRequest(payload)
         } else {
@@ -65,14 +73,7 @@ class GeminiFoodService(private val vertexAccess: VertexAccessRepository? = null
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    // Primary model is the latest Gemini 3.8 Flash, followed by modern active 3.x Flash fallback models
-    private val candidateModels = listOf(
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-flash-latest"
-    )
+    private val candidateModels = listOf("gemini-3.8-flash")
 
     /**
      * Converts Bitmap to Base64 JPEG string, resizing to optimal resolution for high-speed upload.
@@ -109,12 +110,15 @@ class GeminiFoodService(private val vertexAccess: VertexAccessRepository? = null
             return@withContext Result.failure(IllegalArgumentException("API Key cannot be empty."))
         }
 
-        val testModels = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest")
+        val testModels = candidateModels
         var lastErrorMsg = "Failed to connect"
 
         for (modelName in testModels) {
             try {
                 val requestJson = JSONObject().apply {
+                    put("generationConfig", JSONObject()
+                        .put("maxOutputTokens", 64)
+                        .put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW")))
                     put("contents", JSONArray().apply {
                         put(JSONObject().apply {
                             put("parts", JSONArray().apply {
@@ -291,7 +295,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 put("generationConfig", JSONObject().apply {
                     put("responseMimeType", "application/json")
                     put("temperature", 0.1)
-                    put("maxOutputTokens", 1024)
+                    put("maxOutputTokens", 4096)
                 })
             }
 
@@ -305,7 +309,12 @@ Respond strictly with valid JSON without markdown fences matching this schema:
 
                     if (response.isSuccessful && responseBody != null) {
                         Log.d("GeminiFoodService", "Successfully analyzed with model $modelName")
-                        val provisionalNames = extractFoodNames(responseBody)
+                        val parsedMeal = parseGeminiResponse(
+                            responseJsonString = responseBody,
+                            validationThreshold = validationThreshold,
+                            source = FoodDetectionSource.ORIGINAL_IMAGE
+                        )
+                        val provisionalNames = parsedMeal.foods.map { it.name }
                         if (provisionalNames.isNotEmpty()) {
                             onStageUpdate?.invoke(
                                 3,
@@ -313,11 +322,6 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                                 provisionalNames
                             )
                         }
-                        val parsedMeal = parseGeminiResponse(
-                            responseJsonString = responseBody,
-                            validationThreshold = validationThreshold,
-                            source = FoodDetectionSource.ORIGINAL_IMAGE
-                        )
                         return@withContext Result.success(parsedMeal)
                     } else {
                         val errMsg = try {
@@ -565,7 +569,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
      * Parses the JSON from Gemini, separating vision food identification from the Nutrition Database.
      * Enforces the Food Validation Gate to reject non-food and ambiguous images before nutrition calculation.
      */
-    private fun parseGeminiResponse(
+    internal fun parseGeminiResponse(
         responseJsonString: String,
         validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD,
         source: FoodDetectionSource = FoodDetectionSource.ORIGINAL_IMAGE
@@ -586,8 +590,11 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         val parsedObj = JSONObject(cleanJson)
 
         // 1. FOOD VALIDATION GATE (Mandatory)
-        val isFood = parsedObj.optBoolean("is_food", true)
-        val foodConfidence = parsedObj.optDouble("food_confidence", 1.0)
+        val foodConfidence = parsedObj.optDouble("food_confidence", Double.NaN)
+        if (parsedObj.opt("is_food") !is Boolean || !foodConfidence.isFinite() || foodConfidence !in 0.0..1.0) {
+            throw AmbiguousFoodException("Couldn't confidently identify the food. Please upload a clearer image showing the food.")
+        }
+        val isFood = parsedObj.getBoolean("is_food")
         val rejectionReason = parsedObj.optString("rejection_reason", "")
 
         if (!isFood) {

@@ -23,7 +23,7 @@ try {
         gcloud secrets versions add $secretName --data-file=$configPath --project=$project --quiet
     }
     gcloud secrets add-iam-policy-binding $secretName --member="serviceAccount:$serviceAccount" --role=roles/secretmanager.secretAccessor --condition=None --project=$project --quiet --format='value(etag)'
-    gcloud run deploy kalc-vertex --source=. --project=$project --region=$region --service-account=$serviceAccount --no-allow-unauthenticated --min=0 --max=1 --concurrency=8 --memory=256Mi --cpu=1 --timeout=75 --set-secrets="AUTH_CONFIG=${secretName}:latest" --set-env-vars="GOOGLE_CLOUD_PROJECT=$project,VERTEX_MODEL=gemini-3.1-flash-lite" --quiet
+    gcloud run deploy kalc-vertex --source=. --project=$project --region=$region --service-account=$serviceAccount --no-allow-unauthenticated --min=0 --max=1 --concurrency=8 --memory=256Mi --cpu=1 --timeout=75 --set-secrets="AUTH_CONFIG=${secretName}:latest" --set-env-vars="GOOGLE_CLOUD_PROJECT=$project,VERTEX_MODEL=gemini-3.8-flash" --quiet
     Write-Output 'Deployed privately. Verify wrong-passkey rejection and an authorized Vertex call before enabling app access.'
 } finally {
     Pop-Location

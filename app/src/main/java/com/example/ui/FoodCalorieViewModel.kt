@@ -21,8 +21,8 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
-import com.example.data.validation.FoodImageValidator
-import com.example.data.validation.ValidationOutcome
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -303,25 +303,24 @@ class FoodCalorieViewModel(
     fun onImageSelectedFromUri(context: Context, uri: Uri) {
         viewModelScope.launch {
             try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val bitmap = BitmapFactory.decodeStream(stream)
-                    if (bitmap != null) {
-                        _uiState.update {
-                            it.copy(
-                                currentImageBitmap = bitmap,
-                                currentImageResId = null,
-                                currentImageTitle = "Uploaded Custom Food Photo",
-                                analysisState = AnalysisUiState.Analyzing(
-                                    stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
-                                    stepIndex = 1,
-                                    totalSteps = 4,
-                                    progress = 0.25f
-                                )
-                            )
-                        }
-                        analyzeImage(bitmap = bitmap, hint = null)
-                    }
+                val bitmap = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
                 }
+                requireNotNull(bitmap) { "The selected file is not a readable image." }
+                _uiState.update {
+                    it.copy(
+                        currentImageBitmap = bitmap,
+                        currentImageResId = null,
+                        currentImageTitle = "Uploaded Custom Food Photo",
+                        analysisState = AnalysisUiState.Analyzing(
+                            stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
+                            stepIndex = 1,
+                            totalSteps = 4,
+                            progress = 0.25f
+                        )
+                    )
+                }
+                analyzeImage(bitmap = bitmap, hint = null)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -357,40 +356,11 @@ class FoodCalorieViewModel(
 
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
 
-            // Pre-validation gate check (instant local heuristic)
-            val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
-            if (preValidation is ValidationOutcome.Rejected) {
-                _uiState.update {
-                    it.copy(
-                        activeMealResult = null,
-                        analysisState = AnalysisUiState.ValidationFailed(
-                            message = preValidation.message,
-                            isAmbiguous = false,
-                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
-                        )
-                    )
-                }
-                return@launch
-            }
-            if (preValidation is ValidationOutcome.Ambiguous) {
-                _uiState.update {
-                    it.copy(
-                        activeMealResult = null,
-                        analysisState = AnalysisUiState.ValidationFailed(
-                            message = preValidation.message,
-                            isAmbiguous = true,
-                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
-                        )
-                    )
-                }
-                return@launch
-            }
-
-            // Step 1: Food Validation Gate Passed
+            // The shared service runs the validation gate once, off the UI thread.
             _uiState.update {
                 it.copy(
                     analysisState = AnalysisUiState.Analyzing(
-                        stepMessage = "Step 1/4: Food Validation Passed ✓ (Edible food confirmed)",
+                        stepMessage = "Step 1/4: Checking image for recognizable food...",
                         stepIndex = 1,
                         totalSteps = 4,
                         progress = 0.25f

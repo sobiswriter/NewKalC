@@ -1,4 +1,4 @@
-param([switch]$Private, [switch]$Meal)
+param([switch]$Private, [switch]$Meal, [string]$NonFoodImage)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $serverUrl = (gcloud run services describe kalc-vertex --project=gen-lang-client-0100408368 --region=us-central1 --format='value(status.url)').Trim()
@@ -10,7 +10,10 @@ if ($Private) {
 function Send-Request($route, $data, $session = '') {
     $requestHeaders = @{} + $headers
     if ($session) { $requestHeaders['Authorization'] = "Bearer $session" }
-    Invoke-WebRequest "$serverUrl/$route" -Method Post -Headers $requestHeaders -ContentType 'application/json' -Body ($data | ConvertTo-Json -Depth 15 -Compress) -SkipHttpErrorCheck
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $response = Invoke-WebRequest "$serverUrl/$route" -Method Post -Headers $requestHeaders -ContentType 'application/json' -Body ($data | ConvertTo-Json -Depth 15 -Compress) -SkipHttpErrorCheck
+    Write-Host "$route completed in $([Math]::Round($timer.Elapsed.TotalSeconds, 2))s"
+    return $response
 }
 function Assert-Status($response, $expected, $label) {
     if ($response.StatusCode -ne $expected) { throw "$label failed: expected $expected, received $($response.StatusCode)." }
@@ -49,6 +52,20 @@ if ($Meal) {
         $food = $result.candidates[0].content.parts[0].text | ConvertFrom-Json
         if (-not $food.is_food -or $food.detected_foods.Count -lt 1) { throw 'Vision food contract failed.' }
         Write-Output "Photo operation $index returned complete food JSON ($($food.detected_foods.Count) items)."
+    }
+    if ($NonFoodImage) {
+        $nonFood = [Convert]::ToBase64String([IO.File]::ReadAllBytes($NonFoodImage))
+        foreach ($index in @(0, 1)) {
+            $prompt = $prompts[$index].Groups[1].Value.Replace('$validationThreshold', '0.65')
+            $rejected = Send-Request 'generate' @{
+                contents = @(@{ parts = @(@{ text = $prompt }, @{ inlineData = @{ mimeType = 'image/jpeg'; data = $nonFood } }) })
+                generationConfig = @{ responseMimeType = 'application/json'; maxOutputTokens = 4096 }
+            } $session
+            Assert-Status $rejected 200 "Non-food operation $index"
+            $rejection = ($rejected.Content | ConvertFrom-Json).candidates[0].content.parts[0].text | ConvertFrom-Json
+            if ($rejection.is_food -ne $false -or $rejection.detected_foods.Count -ne 0) { throw 'Non-food guardrail failed.' }
+            Write-Output "Non-food operation $index correctly rejected the image."
+        }
     }
     $insightPrompt = $prompts[2].Groups[1].Value.Replace('$foodsSummary', 'Rice, dal, aloo sabzi, salad')
     $chatPrompt = [regex]::Match($source, '(?s)val systemContext = """\r?\n(.*?)\r?\n"""\.trimIndent\(\)').Groups[1].Value
