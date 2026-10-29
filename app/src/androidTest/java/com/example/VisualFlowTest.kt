@@ -29,6 +29,7 @@ class VisualFlowTest {
 
     @Test fun redesignedMealEditingNavigationAndConnectionRemainUsable() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        context.getSharedPreferences("kalc_profile", 0).edit().putBoolean("onboarded", true).commit()
         val keys = ApiKeyRepository.getInstance(context)
         keys.clearApiKey()
         keys.setStartupPromptDismissed(true)
@@ -36,7 +37,9 @@ class VisualFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithText("KalC").assertIsDisplayed()
             compose.onNodeWithText("SAMPLE MEAL").assertIsDisplayed()
-            compose.onNodeWithTag("scan_meal_button").assertIsDisplayed().assertHasClickAction()
+            compose.onNodeWithTag("scan_meal_button").assertDoesNotExist()
+            compose.onNodeWithTag("camera_button").assertIsDisplayed().assertHasClickAction()
+            compose.onNodeWithTag("gallery_button").assertIsDisplayed().assertHasClickAction()
             capture("redesign-meal")
             compose.onNodeWithTag("hero_adjust_button").performScrollTo().performClick()
             val before = compose.onNodeWithText("Live Total:", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].first().text

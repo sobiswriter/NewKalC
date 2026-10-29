@@ -47,7 +47,18 @@
 - [x] Build and signature-verify non-debug release 1.1, install/start it, and copy the APK to Downloads.
 - [x] Update installation, model, credentials, performance, and verification documentation.
 
-## Visual overhaul — native version 1.2
+## Profile and premium refinement — version 1.3
+
+- [x] Remove duplicate bottom scan/gallery actions; refine summary/title/navigation.
+- [x] Add skippable four-step onboarding and an editable Profile section.
+- [x] Default personalization OFF; send context only to insights/chat with explicit consent.
+- [x] Encrypt local profile data, exclude backups, validate fields, and provide deletion.
+- [x] Clear old advice/chat and reject stale profile-generation results on changes.
+- [x] Pass 24 unit tests, 10 backend tests, six core device tests, and four dark/360dp/130% text checks.
+- [x] Build signed version 1.3 with the existing release certificate.
+- [x] Verify live opted-in synthetic-profile insights/chat and an in-place signed 1.2 upgrade.
+
+## Version 1.2 baseline
 
 - [x] Deliver and browser-verify `docs/visual-overhaul-preview.html` with `docs/UI_OVERHAUL_PLAN.md`.
 - [x] Translate the visual direction into native Compose, including theme, meal summary, editing, navigation, insights, chat, and provider settings.

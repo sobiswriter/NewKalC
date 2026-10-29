@@ -67,8 +67,9 @@ if ($Meal) {
             Write-Output "Non-food operation $index correctly rejected the image."
         }
     }
-    $insightPrompt = $prompts[2].Groups[1].Value.Replace('$foodsSummary', 'Rice, dal, aloo sabzi, salad')
+    $insightPrompt = $prompts[2].Groups[1].Value.Replace('$foodsSummary', 'Rice, dal, aloo sabzi, salad').Replace('${profile.aiContext()}', '')
     $chatPrompt = [regex]::Match($source, '(?s)val systemContext = """\r?\n(.*?)\r?\n"""\.trimIndent\(\)').Groups[1].Value
+    $chatPrompt = $chatPrompt.Replace('${profile.aiContext()}', '')
     $replacements = @{
         '${total.calories}' = '518'; '${total.protein}' = '16.1'; '${total.carbs}' = '94.9'; '${total.fat}' = '8.6'
         '$foodListDesc' = 'Rice 180g, dal 150g, aloo sabzi 120g, salad 50g'; '$addedDesc' = 'No added foods'

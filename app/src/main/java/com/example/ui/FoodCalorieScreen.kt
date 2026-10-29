@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Restaurant
@@ -171,6 +172,14 @@ fun FoodCalorieScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    if (uiState.isProfileLoading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    if (uiState.showProfileOnboarding || uiState.showProfile) {
+        ProfileScreen(viewModel, uiState)
+        return
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -369,29 +378,6 @@ fun FoodCalorieScreen(
             )
         },
         bottomBar = {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = launchCameraSafely,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.weight(1f).height(52.dp).testTag("scan_meal_button")
-                    ) {
-                        Icon(Icons.Default.CameraAlt, null, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("Scan a meal")
-                    }
-                    OutlinedButton(
-                        onClick = { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(14.dp),
-                        modifier = Modifier.size(52.dp)
-                    ) { Icon(Icons.Default.Image, "Choose a meal photo") }
-                }
-
             SmartNavigationBottomBar(
                 activeTab = uiState.activeNavTab,
                 onTabSelected = { tabIndex ->
@@ -410,10 +396,10 @@ fun FoodCalorieScreen(
                         2 -> {
                             viewModel.openAskAiSheet()
                         }
+                        3 -> viewModel.openProfile()
                     }
                 }
             )
-            }
         }
     ) { innerPadding ->
         Box(
@@ -470,6 +456,7 @@ fun FoodCalorieScreen(
                         AiNutritionInsightsSection(
                             insights = uiState.nutritionInsights,
                             isGenerating = uiState.isGeneratingInsights,
+                            personalized = uiState.isPersonalizedInsights,
                             isExpanded = uiState.insightsExpanded,
                             onToggleExpand = { viewModel.toggleInsightsExpansion() },
                             onRefreshInsights = { viewModel.refreshInsights() },
@@ -952,7 +939,7 @@ private fun CompactFoodItemRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    // Source Icon Badge ('P' for original photo, '+' for added photo, 'M' for manual search)
+                    if (food.source != FoodDetectionSource.ORIGINAL_IMAGE) {
                     Surface(
                         shape = CircleShape,
                         color = when (food.source) {
@@ -980,6 +967,7 @@ private fun CompactFoodItemRow(
                                 }
                             )
                         }
+                    }
                     }
                 }
                 Row(
@@ -1144,6 +1132,7 @@ private fun CompactFoodItemRow(
 private fun AiNutritionInsightsSection(
     insights: NutritionInsights?,
     isGenerating: Boolean,
+    personalized: Boolean,
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
     onRefreshInsights: () -> Unit,
@@ -1210,6 +1199,11 @@ private fun AiNutritionInsightsSection(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            Text(if (personalized) "TAILORED TO YOUR PROFILE" else "GENERAL MEAL GUIDANCE",
+                style = MaterialTheme.typography.labelSmall, letterSpacing = 1.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
 
             if (insights != null) {
                 // Headline Takeaway
@@ -1454,12 +1448,11 @@ private fun SmartNavigationBottomBar(
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
         )
     ) {
-        // Full width segmented pill containing only the 3 primary tabs
-        // Eliminates line-wrapping ("Insight\ns") and cramped text on all screen sizes
+        // Keep the four destinations reachable without covering meal content.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1484,6 +1477,10 @@ private fun SmartNavigationBottomBar(
                 onClick = { onTabSelected(2) },
                 modifier = Modifier.weight(1f)
             )
+            NavigationTabItem(
+                title = "Profile", icon = Icons.Default.PersonOutline,
+                isSelected = activeTab == 3, onClick = { onTabSelected(3) }, modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -1497,11 +1494,11 @@ private fun NavigationTabItem(
     modifier: Modifier = Modifier
 ) {
     val backgroundColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         label = "tab_bg"
     )
     val contentColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         label = "tab_content"
     )
 

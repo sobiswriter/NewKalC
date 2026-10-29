@@ -30,6 +30,7 @@ class ProviderConnectionTest {
         assumeTrue("Live verification requires the owner's passkey at runtime.", !passkey.isNullOrEmpty())
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        context.getSharedPreferences("kalc_profile", 0).edit().putBoolean("onboarded", true).commit()
         context.getSharedPreferences("kalc_ai_connection", 0).edit().clear().commit()
         context.getSharedPreferences("food_calorie_ai_prefs", 0).edit().clear().commit()
         val apiKeys = ApiKeyRepository.getInstance(context)

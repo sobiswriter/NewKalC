@@ -21,6 +21,8 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
+import com.example.data.profile.ProfileRepository
+import com.example.data.profile.UserProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
@@ -58,6 +60,13 @@ data class SampleFoodPreset(
 )
 
 data class FoodCalorieUiState(
+    val profile: UserProfile = UserProfile(),
+    val isProfileLoading: Boolean = true,
+    val showProfileOnboarding: Boolean = false,
+    val showProfile: Boolean = false,
+    val isSavingProfile: Boolean = false,
+    val profileError: String? = null,
+    val isPersonalizedInsights: Boolean = false,
     val analysisState: AnalysisUiState = AnalysisUiState.Idle,
     val currentImageBitmap: Bitmap? = null,
     val currentImageResId: Int? = R.drawable.sample_thali,
@@ -107,6 +116,8 @@ class FoodCalorieViewModel(
     private val apiKeyRepository = ApiKeyRepository.getInstance(application)
     private val vertexAccess = VertexAccessRepository(application)
     private val geminiService = GeminiFoodService(vertexAccess)
+    private val profileRepository = ProfileRepository(application)
+    private var profileRevision = 0
 
     private val _uiState = MutableStateFlow(
         FoodCalorieUiState(
@@ -141,6 +152,15 @@ class FoodCalorieViewModel(
     )
 
     init {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { profileRepository.load() }
+            _uiState.update {
+                it.copy(profile = result.getOrDefault(UserProfile()), isProfileLoading = false,
+                    showProfileOnboarding = !profileRepository.onboarded,
+                    showProfile = result.isFailure,
+                    profileError = if (result.isFailure) "Your saved profile could not be read. Delete it to start again." else null)
+            }
+        }
         viewModelScope.launch {
             vertexAccess.state.collectLatest { connection ->
                 _uiState.update { it.copy(aiProvider = connection.provider, isVertexUnlocked = connection.unlocked) }
@@ -533,14 +553,18 @@ class FoodCalorieViewModel(
      */
     fun refreshInsights(meal: MealAnalysisResult? = _uiState.value.activeMealResult) {
         if (meal == null) return
+        val revision = profileRevision
+        val profile = _uiState.value.profile
         viewModelScope.launch {
             _uiState.update { it.copy(isGeneratingInsights = true) }
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
-            val result = geminiService.generateNutritionInsights(meal, effectiveKey)
+            val result = geminiService.generateNutritionInsights(meal, effectiveKey, profile)
+            if (revision != profileRevision) return@launch
             result.onSuccess { insights ->
                 _uiState.update {
                     it.copy(
                         nutritionInsights = insights,
+                        isPersonalizedInsights = profile.personalizationEnabled,
                         isGeneratingInsights = false
                     )
                 }
@@ -550,6 +574,7 @@ class FoodCalorieViewModel(
                 _uiState.update {
                     it.copy(
                         nutritionInsights = fallback,
+                        isPersonalizedInsights = false,
                         isGeneratingInsights = false
                     )
                 }
@@ -571,6 +596,10 @@ class FoodCalorieViewModel(
         val currentMeal = _uiState.value.activeMealResult ?: return
         val currentBitmap = _uiState.value.currentImageBitmap
         val effectiveKey = apiKeyRepository.getEffectiveApiKey()
+
+        if (_uiState.value.isAskingQuestion) return
+        val revision = profileRevision
+        val profile = _uiState.value.profile
 
         val currentFoodNames = currentMeal.foods.map { it.name }
         val originalFoods = _uiState.value.originalFoodNames
@@ -594,8 +623,10 @@ class FoodCalorieViewModel(
                 bitmap = currentBitmap,
                 providedApiKey = effectiveKey,
                 userAddedFoods = userAdded,
-                userRemovedFoods = userRemoved
+                userRemovedFoods = userRemoved,
+                profile = profile
             )
+            if (revision != profileRevision) return@launch
 
             val replyText = responseResult.getOrElse {
                 handleVertexAccessError(it)
@@ -618,6 +649,40 @@ class FoodCalorieViewModel(
                 activeNavTab = tabIndex,
                 showAskAiSheet = if (tabIndex == 2) true else it.showAskAiSheet
             )
+        }
+    }
+
+    fun openProfile() { _uiState.update { it.copy(showProfile = true, profileError = null) } }
+    fun closeProfile() { _uiState.update { it.copy(showProfile = false, activeNavTab = 0, profileError = null) } }
+
+    fun saveProfile(profile: UserProfile, onDone: (Boolean) -> Unit = {}) = updateProfile(profile, delete = false, skip = false, onDone = onDone)
+    fun setPersonalization(enabled: Boolean) = saveProfile(_uiState.value.profile.copy(personalizationEnabled = enabled))
+    fun deleteProfile() = updateProfile(UserProfile(), delete = true, skip = false)
+    fun skipProfileOnboarding() = updateProfile(UserProfile(), delete = false, skip = true)
+
+    private fun updateProfile(profile: UserProfile, delete: Boolean, skip: Boolean, onDone: (Boolean) -> Unit = {}) {
+        if (_uiState.value.isSavingProfile) return
+        _uiState.update { it.copy(isSavingProfile = true, profileError = null) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                when { delete -> profileRepository.delete(); skip -> profileRepository.skipOnboarding(); else -> profileRepository.save(profile) }
+            }
+            result.onSuccess {
+                profileRevision++
+                _uiState.update { state ->
+                    state.copy(profile = profile, isSavingProfile = false, showProfileOnboarding = false,
+                        nutritionInsights = state.activeMealResult?.let(geminiService::getDeterministicNutritionInsights),
+                        isPersonalizedInsights = false, chatMessages = emptyList(), currentQuestionInput = "",
+                        isGeneratingInsights = false, isAskingQuestion = false)
+                }
+                val state = _uiState.value
+                val connected = if (state.aiProvider == AiProvider.VERTEX) state.isVertexUnlocked else state.isApiKeyConfigured
+                if (profile.personalizationEnabled && connected) refreshInsights()
+                onDone(true)
+            }.onFailure {
+                _uiState.update { state -> state.copy(isSavingProfile = false, profileError = "Profile changes could not be saved. Please retry.") }
+                onDone(false)
+            }
         }
     }
 

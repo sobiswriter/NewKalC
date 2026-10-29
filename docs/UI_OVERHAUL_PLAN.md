@@ -2,6 +2,8 @@
 
 Status: implemented in the native Android app in **version 1.2**. Version 1.1 shipped only the provider migration; the HTML file was a design prototype. The installed 1.2 app now uses this direction in Compose, including the meal header, nutrition summary, navigation, editing, insights, chat, and AI connection screens. The original `visual-overhaul-preview.html` remains a historical design reference; screenshots of the native app are recorded in `VISUAL_RELEASE_1_2.md`.
 
+**Version 1.3 refinement:** removes the duplicate bottom scan/gallery strip, retains top-right photo actions, simplifies the meal title and nutrition panel, and adds the Profile destination. Optional onboarding and default-off personalization are documented in `PROFILE_RELEASE_1_3.md`.
+
 ## Design contract
 
 The meal screen answers three questions in order: what am I eating, what is the estimated nutrition, and what can I adjust? One dominant action starts a new scan. Portion changes and adding sides stay contextual. The existing Meal / Insights / Ask AI navigation remains recognizable.

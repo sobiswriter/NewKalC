@@ -1,6 +1,6 @@
 # Vertex migration verification — 2026-10-29
 
-**Latest app:** version 1.2 adds the native visual overhaul while retaining this backend/provider behavior. See [native screenshots, release, and upgrade checks](VISUAL_RELEASE_1_2.md). The version 1.1 artifact/hash below records the migration release.
+**Latest app:** version 1.3 refines the native design and adds optional profile personalization while retaining this backend/provider behavior. See [profile privacy, screenshots, and upgrade checks](PROFILE_RELEASE_1_3.md). The version 1.1 artifact/hash below records the migration release; [version 1.2](VISUAL_RELEASE_1_2.md) records the initial native overhaul.
 
 ## Delivered behavior
 

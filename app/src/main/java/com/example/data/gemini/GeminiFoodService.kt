@@ -16,6 +16,7 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
+import com.example.data.profile.UserProfile
 import com.example.data.validation.FoodImageValidator
 import com.example.data.validation.ValidationOutcome
 import kotlinx.coroutines.Dispatchers
@@ -862,12 +863,14 @@ Respond strictly with valid JSON without markdown fences matching this schema:
      */
     suspend fun generateNutritionInsights(
         meal: MealAnalysisResult,
-        providedApiKey: String? = null
+        providedApiKey: String? = null,
+        profile: UserProfile = UserProfile()
     ): Result<NutritionInsights> = withContext(Dispatchers.IO) {
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
         val isRealKey = usesVertex || (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY")
 
+        if (!isRealKey && profile.personalizationEnabled) return@withContext Result.failure(IllegalStateException("Connect an AI provider to get personalized guidance."))
         if (!isRealKey) {
             return@withContext Result.success(getDeterministicNutritionInsights(meal))
         }
@@ -879,7 +882,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             }
 
             val prompt = """
-You are an expert clinical dietitian analyzing a user's final edited meal.
+You are a nutrition guide analyzing a user's final edited meal. Give general food guidance, not diagnoses or treatment plans.
+${profile.aiContext()}
 Meal items: $foodsSummary
 Total: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
 
@@ -927,11 +931,11 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 }
             }
 
-            Result.success(getDeterministicNutritionInsights(meal))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("Personalized insights are unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicNutritionInsights(meal))
         } catch (e: Exception) {
                     if (e is VertexAccessException) return@withContext Result.failure(e)
             Log.e("GeminiFoodService", "Error generating insights: ${e.message}")
-            Result.success(getDeterministicNutritionInsights(meal))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("Personalized insights are unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicNutritionInsights(meal))
         }
     }
 
@@ -1042,7 +1046,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         bitmap: Bitmap?,
         providedApiKey: String? = null,
         userAddedFoods: List<String> = emptyList(),
-        userRemovedFoods: List<String> = emptyList()
+        userRemovedFoods: List<String> = emptyList(),
+        profile: UserProfile = UserProfile()
     ): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
@@ -1056,6 +1061,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         val addedDesc = if (userAddedFoods.isNotEmpty()) "User added foods: ${userAddedFoods.joinToString(", ")}" else "No user-added foods"
         val removedDesc = if (userRemovedFoods.isNotEmpty()) "User removed foods: ${userRemovedFoods.joinToString(", ")}" else "No foods removed"
 
+        if (!isRealKey && profile.personalizationEnabled) return@withContext Result.failure(IllegalStateException("Connect an AI provider to get personalized guidance."))
         if (!isRealKey) {
             return@withContext Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         }
@@ -1063,6 +1069,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         try {
             val systemContext = """
 You are a friendly, evidence-based nutrition AI assisting a user with their current meal.
+Give general food guidance, not diagnoses or treatment plans.
+${profile.aiContext()}
 CURRENT MEAL (User Edited):
 $foodListDesc
 TOTALS: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
@@ -1110,11 +1118,11 @@ User Question: "$question"
                 }
             }
 
-            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("A personalized answer is unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         } catch (e: Exception) {
                     if (e is VertexAccessException) return@withContext Result.failure(e)
             Log.e("GeminiFoodService", "Exception in askAboutFood: ${e.message}")
-            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("A personalized answer is unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         }
     }
 
