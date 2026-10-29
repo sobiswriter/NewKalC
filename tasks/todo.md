@@ -69,3 +69,18 @@
 - Acceptance: complete meal workflow stays usable, provider status is clear, all controls have 48dp touch targets.
 - Verification: real Compose instrumentation, native screenshots, signed release build, and upgrade installation. See `docs/VISUAL_RELEASE_1_2.md`.
 - Files: current screen, theme tokens/type, targeted UI checks; scope: medium increments. Depends on design review, separate from migration.
+
+
+## Make a meal and local history — version 1.4
+
+- [x] Native ingredient capture/manual confirmation, explicit pantry/equipment and meal brief.
+- [x] Three recipe groups, Quick/Healthy Grab, complete cookbooks and approved recipe revisions.
+- [x] Saved cooking progress, persisted restrictions, real scheduled reminders and optional keep-awake.
+- [x] Shared local scan/cooked/recipe history, offline snapshots, bounded photos and deletion controls.
+- [x] Confirm cooked, optional linked KalC plate scan and bounded cooking review with editable notes.
+- [x] Preserve provider/model/authentication and master/session profile-consent boundaries.
+- [x] Pass 34 unit tests, 10 backend tests, six core native UI checks, two live Vertex checks and a delivered timer notification.
+- [x] Check six core UI paths at 360dp / 130% text / dark; full release lint passes with zero errors.
+- [x] Build/sign/install version 1.4 with the existing owner certificate; copy normal APK to Downloads.
+- [x] Move serializer/AI setup off startup UI work; record an 866 ms emulator cold activity launch.
+- [ ] Physical-device camera, TalkBack, vendor behavior, live Studio key and recipe execution remain unverified. See docs/MAKE_A_MEAL_RELEASE_1_4.md.

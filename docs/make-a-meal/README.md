@@ -21,6 +21,6 @@ Try these:
 6. Healthy Grab stays general with personalization off; demo personalization only simulates an egg-free preference.
 7. Open a recipe, check ingredients, enter cooking mode and try the example chat prompts.
 
-This is a concept, not an APK or a live AI service. The camera, chat and timer are demonstrations. Recipes and timings are fictional original fixtures and are not kitchen-tested. The existing Android app remains 1.3.
+This is a concept, not an APK or a live AI service. The camera, chat and timer are demonstrations. Recipes and timings are fictional original fixtures and are not kitchen-tested. The native implementation is documented separately in `../MAKE_A_MEAL_RELEASE_1_4.md`; these storyboard files remain sample-data design material.
 
 The browser/server preview in the Codex task is loopback-only; this folder remains usable if that preview stops.
