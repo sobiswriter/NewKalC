@@ -9,6 +9,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.auth.ApiKeyRepository
+import com.example.data.auth.AiProvider
+import com.example.data.auth.VertexAccessRepository
+import com.example.data.auth.VertexAccessException
 import com.example.data.gemini.GeminiFoodService
 import com.example.data.model.AmbiguousFoodException
 import com.example.data.model.ChatMessage
@@ -18,12 +21,15 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
-import com.example.data.validation.FoodImageValidator
-import com.example.data.validation.ValidationOutcome
+import com.example.data.profile.ProfileRepository
+import com.example.data.profile.UserProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -54,6 +60,13 @@ data class SampleFoodPreset(
 )
 
 data class FoodCalorieUiState(
+    val profile: UserProfile = UserProfile(),
+    val isProfileLoading: Boolean = true,
+    val showProfileOnboarding: Boolean = false,
+    val showProfile: Boolean = false,
+    val isSavingProfile: Boolean = false,
+    val profileError: String? = null,
+    val isPersonalizedInsights: Boolean = false,
     val analysisState: AnalysisUiState = AnalysisUiState.Idle,
     val currentImageBitmap: Bitmap? = null,
     val currentImageResId: Int? = R.drawable.sample_thali,
@@ -68,6 +81,9 @@ data class FoodCalorieUiState(
     val showApiKeyDialog: Boolean = false,
     val isStartupPrompt: Boolean = false,
     val isTestingApiKey: Boolean = false,
+    val aiProvider: AiProvider = AiProvider.VERTEX,
+    val isVertexUnlocked: Boolean = false,
+    val isUnlockingVertex: Boolean = false,
     // Food Validation Gate configurable threshold
     val validationThreshold: Double = 0.65,
     // Full screen image inspection viewer
@@ -97,11 +113,15 @@ class FoodCalorieViewModel(
     application: Application
 ) : AndroidViewModel(application) {
 
-    private val geminiService = GeminiFoodService()
     private val apiKeyRepository = ApiKeyRepository.getInstance(application)
+    private val vertexAccess = VertexAccessRepository(application)
+    private val geminiService = GeminiFoodService(vertexAccess)
+    private val profileRepository = ProfileRepository(application)
+    private var profileRevision = 0
 
     private val _uiState = MutableStateFlow(
         FoodCalorieUiState(
+            aiProvider = vertexAccess.provider,
             isApiKeyConfigured = apiKeyRepository.hasValidApiKey(),
             currentApiKeyMasked = maskApiKey(apiKeyRepository.getEffectiveApiKey()),
             showApiKeyDialog = !apiKeyRepository.hasValidApiKey() && !apiKeyRepository.hasDismissedStartupPrompt(),
@@ -132,6 +152,24 @@ class FoodCalorieViewModel(
     )
 
     init {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { profileRepository.load() }
+            _uiState.update {
+                it.copy(profile = result.getOrDefault(UserProfile()), isProfileLoading = false,
+                    showProfileOnboarding = !profileRepository.onboarded,
+                    showProfile = result.isFailure,
+                    profileError = if (result.isFailure) "Your saved profile could not be read. Delete it to start again." else null)
+            }
+        }
+        viewModelScope.launch {
+            vertexAccess.state.collectLatest { connection ->
+                _uiState.update { it.copy(aiProvider = connection.provider, isVertexUnlocked = connection.unlocked) }
+                if (connection.unlocked) {
+                    delay((connection.expiresAt - System.currentTimeMillis()).coerceAtLeast(0))
+                    vertexAccess.lock()
+                }
+            }
+        }
         preloadDefaultSample()
     }
 
@@ -172,6 +210,37 @@ class FoodCalorieViewModel(
         }
     }
 
+    fun selectAiProvider(provider: AiProvider) {
+        if (provider == vertexAccess.provider) return
+        vertexAccess.selectProvider(provider)
+        _uiState.update { it.copy(aiProvider = provider, isVertexUnlocked = false, feedbackBanner = null) }
+    }
+
+    fun unlockVertex(passkey: String, onDone: (Boolean, String) -> Unit) {
+        if (_uiState.value.isUnlockingVertex) return
+        _uiState.update { it.copy(isUnlockingVertex = true) }
+        viewModelScope.launch {
+            val result = vertexAccess.unlock(passkey)
+            _uiState.update { it.copy(isUnlockingVertex = false) }
+            result.onSuccess {
+                apiKeyRepository.setStartupPromptDismissed(true)
+                _uiState.update { it.copy(showApiKeyDialog = false, feedbackBanner = "Vertex AI unlocked. Connected to On Sundays.") }
+                onDone(true, "Server unlocked.")
+            }.onFailure { onDone(false, it.message ?: "Server access denied.") }
+        }
+    }
+
+    fun lockVertex() {
+        vertexAccess.lock()
+        _uiState.update { it.copy(isVertexUnlocked = false, feedbackBanner = "Vertex AI locked.") }
+    }
+
+    private fun handleVertexAccessError(error: Throwable) {
+        if (error is VertexAccessException) {
+            _uiState.update { it.copy(isVertexUnlocked = false, showApiKeyDialog = true, feedbackBanner = error.message) }
+        }
+    }
+
     fun saveAndValidateApiKey(apiKey: String, onDone: (Boolean, String) -> Unit) {
         val cleanKey = apiKey.trim()
         if (cleanKey.isEmpty()) {
@@ -192,22 +261,12 @@ class FoodCalorieViewModel(
                         isApiKeyConfigured = true,
                         currentApiKeyMasked = maskApiKey(cleanKey),
                         showApiKeyDialog = false,
-                        feedbackBanner = "Google AI Studio API Key connected! Gemini 3.8 Flash is active."
+                        feedbackBanner = "Google AI Studio connected."
                     )
                 }
                 onDone(true, "Connected successfully!")
             }.onFailure { error ->
-                apiKeyRepository.saveApiKey(cleanKey)
-                apiKeyRepository.setStartupPromptDismissed(true)
-                _uiState.update {
-                    it.copy(
-                        isApiKeyConfigured = true,
-                        currentApiKeyMasked = maskApiKey(cleanKey),
-                        showApiKeyDialog = false,
-                        feedbackBanner = "API Key saved. (${error.message})"
-                    )
-                }
-                onDone(true, "Key saved.")
+                onDone(false, error.message ?: "Could not validate this API key. Please retry.")
             }
         }
     }
@@ -218,7 +277,7 @@ class FoodCalorieViewModel(
             it.copy(
                 isApiKeyConfigured = false,
                 currentApiKeyMasked = "",
-                feedbackBanner = "API Key removed. Reverted to demo mode."
+                feedbackBanner = "Saved AI Studio key removed."
             )
         }
     }
@@ -264,25 +323,24 @@ class FoodCalorieViewModel(
     fun onImageSelectedFromUri(context: Context, uri: Uri) {
         viewModelScope.launch {
             try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val bitmap = BitmapFactory.decodeStream(stream)
-                    if (bitmap != null) {
-                        _uiState.update {
-                            it.copy(
-                                currentImageBitmap = bitmap,
-                                currentImageResId = null,
-                                currentImageTitle = "Uploaded Custom Food Photo",
-                                analysisState = AnalysisUiState.Analyzing(
-                                    stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
-                                    stepIndex = 1,
-                                    totalSteps = 4,
-                                    progress = 0.25f
-                                )
-                            )
-                        }
-                        analyzeImage(bitmap = bitmap, hint = null)
-                    }
+                val bitmap = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
                 }
+                requireNotNull(bitmap) { "The selected file is not a readable image." }
+                _uiState.update {
+                    it.copy(
+                        currentImageBitmap = bitmap,
+                        currentImageResId = null,
+                        currentImageTitle = "Uploaded Custom Food Photo",
+                        analysisState = AnalysisUiState.Analyzing(
+                            stepMessage = "Step 1/4: Food Validation Gate checking edible content...",
+                            stepIndex = 1,
+                            totalSteps = 4,
+                            progress = 0.25f
+                        )
+                    )
+                }
+                analyzeImage(bitmap = bitmap, hint = null)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -318,40 +376,11 @@ class FoodCalorieViewModel(
 
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
 
-            // Pre-validation gate check (instant local heuristic)
-            val preValidation = FoodImageValidator.preValidateBitmap(bitmap)
-            if (preValidation is ValidationOutcome.Rejected) {
-                _uiState.update {
-                    it.copy(
-                        activeMealResult = null,
-                        analysisState = AnalysisUiState.ValidationFailed(
-                            message = preValidation.message,
-                            isAmbiguous = false,
-                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
-                        )
-                    )
-                }
-                return@launch
-            }
-            if (preValidation is ValidationOutcome.Ambiguous) {
-                _uiState.update {
-                    it.copy(
-                        activeMealResult = null,
-                        analysisState = AnalysisUiState.ValidationFailed(
-                            message = preValidation.message,
-                            isAmbiguous = true,
-                            disclaimer = "Food analysis is an estimate and should not be treated as medical or dietary advice."
-                        )
-                    )
-                }
-                return@launch
-            }
-
-            // Step 1: Food Validation Gate Passed
+            // The shared service runs the validation gate once, off the UI thread.
             _uiState.update {
                 it.copy(
                     analysisState = AnalysisUiState.Analyzing(
-                        stepMessage = "Step 1/4: Food Validation Passed ✓ (Edible food confirmed)",
+                        stepMessage = "Step 1/4: Checking image for recognizable food...",
                         stepIndex = 1,
                         totalSteps = 4,
                         progress = 0.25f
@@ -459,7 +488,11 @@ class FoodCalorieViewModel(
                     it.copy(analysisState = AnalysisUiState.Success(mealResult))
                 }
             }.onFailure { error ->
+                handleVertexAccessError(error)
                 when (error) {
+                    is VertexAccessException -> {
+                        _uiState.update { it.copy(activeMealResult = null, analysisState = AnalysisUiState.Error(error.message ?: "Server access denied.")) }
+                    }
                     is NonFoodException -> {
                         _uiState.update {
                             it.copy(
@@ -499,7 +532,7 @@ class FoodCalorieViewModel(
                             refreshInsights(fallbackMeal)
                         } else {
                             // FOR USER CAMERA / GALLERY PHOTOS: BE 100% HONEST!
-                            val errMessage = error.message ?: "Failed to analyze image with Gemini. Please check your API key or connection."
+                            val errMessage = error.message ?: "Failed to analyze image with Gemini. Please check your AI settings or connection."
                             _uiState.update {
                                 it.copy(
                                     activeMealResult = null,
@@ -520,22 +553,28 @@ class FoodCalorieViewModel(
      */
     fun refreshInsights(meal: MealAnalysisResult? = _uiState.value.activeMealResult) {
         if (meal == null) return
+        val revision = profileRevision
+        val profile = _uiState.value.profile
         viewModelScope.launch {
             _uiState.update { it.copy(isGeneratingInsights = true) }
             val effectiveKey = apiKeyRepository.getEffectiveApiKey()
-            val result = geminiService.generateNutritionInsights(meal, effectiveKey)
+            val result = geminiService.generateNutritionInsights(meal, effectiveKey, profile)
+            if (revision != profileRevision) return@launch
             result.onSuccess { insights ->
                 _uiState.update {
                     it.copy(
                         nutritionInsights = insights,
+                        isPersonalizedInsights = profile.personalizationEnabled,
                         isGeneratingInsights = false
                     )
                 }
-            }.onFailure {
-                val fallback = geminiService.getDeterministicNutritionInsights(meal)
+            }.onFailure { error ->
+                handleVertexAccessError(error)
+                val fallback = if (error is VertexAccessException) null else geminiService.getDeterministicNutritionInsights(meal)
                 _uiState.update {
                     it.copy(
                         nutritionInsights = fallback,
+                        isPersonalizedInsights = false,
                         isGeneratingInsights = false
                     )
                 }
@@ -557,6 +596,10 @@ class FoodCalorieViewModel(
         val currentMeal = _uiState.value.activeMealResult ?: return
         val currentBitmap = _uiState.value.currentImageBitmap
         val effectiveKey = apiKeyRepository.getEffectiveApiKey()
+
+        if (_uiState.value.isAskingQuestion) return
+        val revision = profileRevision
+        val profile = _uiState.value.profile
 
         val currentFoodNames = currentMeal.foods.map { it.name }
         val originalFoods = _uiState.value.originalFoodNames
@@ -580,11 +623,14 @@ class FoodCalorieViewModel(
                 bitmap = currentBitmap,
                 providedApiKey = effectiveKey,
                 userAddedFoods = userAdded,
-                userRemovedFoods = userRemoved
+                userRemovedFoods = userRemoved,
+                profile = profile
             )
+            if (revision != profileRevision) return@launch
 
             val replyText = responseResult.getOrElse {
-                "Based on your meal totals (${currentMeal.total.calories} kcal, ${currentMeal.total.protein}g protein), this meal provides balanced fuel. Adjusting portions will update these values."
+                handleVertexAccessError(it)
+                it.message ?: "Could not answer your question. Please retry."
             }
 
             val aiMessage = ChatMessage(isUser = false, text = replyText)
@@ -603,6 +649,40 @@ class FoodCalorieViewModel(
                 activeNavTab = tabIndex,
                 showAskAiSheet = if (tabIndex == 2) true else it.showAskAiSheet
             )
+        }
+    }
+
+    fun openProfile() { _uiState.update { it.copy(showProfile = true, profileError = null) } }
+    fun closeProfile() { _uiState.update { it.copy(showProfile = false, activeNavTab = 0, profileError = null) } }
+
+    fun saveProfile(profile: UserProfile, onDone: (Boolean) -> Unit = {}) = updateProfile(profile, delete = false, skip = false, onDone = onDone)
+    fun setPersonalization(enabled: Boolean) = saveProfile(_uiState.value.profile.copy(personalizationEnabled = enabled))
+    fun deleteProfile() = updateProfile(UserProfile(), delete = true, skip = false)
+    fun skipProfileOnboarding() = updateProfile(UserProfile(), delete = false, skip = true)
+
+    private fun updateProfile(profile: UserProfile, delete: Boolean, skip: Boolean, onDone: (Boolean) -> Unit = {}) {
+        if (_uiState.value.isSavingProfile) return
+        _uiState.update { it.copy(isSavingProfile = true, profileError = null) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                when { delete -> profileRepository.delete(); skip -> profileRepository.skipOnboarding(); else -> profileRepository.save(profile) }
+            }
+            result.onSuccess {
+                profileRevision++
+                _uiState.update { state ->
+                    state.copy(profile = profile, isSavingProfile = false, showProfileOnboarding = false,
+                        nutritionInsights = state.activeMealResult?.let(geminiService::getDeterministicNutritionInsights),
+                        isPersonalizedInsights = false, chatMessages = emptyList(), currentQuestionInput = "",
+                        isGeneratingInsights = false, isAskingQuestion = false)
+                }
+                val state = _uiState.value
+                val connected = if (state.aiProvider == AiProvider.VERTEX) state.isVertexUnlocked else state.isApiKeyConfigured
+                if (profile.personalizationEnabled && connected) refreshInsights()
+                onDone(true)
+            }.onFailure {
+                _uiState.update { state -> state.copy(isSavingProfile = false, profileError = "Profile changes could not be saved. Please retry.") }
+                onDone(false)
+            }
         }
     }
 
@@ -813,6 +893,7 @@ class FoodCalorieViewModel(
                     }
                 }
             }.onFailure { error ->
+                handleVertexAccessError(error)
                 when (error) {
                     is NonFoodException -> {
                         _uiState.update {

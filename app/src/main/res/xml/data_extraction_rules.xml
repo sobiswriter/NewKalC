@@ -5,15 +5,15 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="food_calorie_ai_prefs.xml" />
+        <exclude domain="sharedpref" path="kalc_profile.xml" />
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
         -->
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="food_calorie_ai_prefs.xml" />
+        <exclude domain="sharedpref" path="kalc_profile.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -1,6 +1,18 @@
 # 🥗 KalC — Food Calorie AI
 ### Deep Learning Multimodal Meal Recognition, Monocular Portion Estimation & Deterministic Nutrition Engine
 
+**AI connections:** In **API Key & AI Settings**, choose **Vertex AI server** to use the On Sundays backend with its shared passkey, or **AI Studio** to use your own Google API key. A wrong passkey grants no server access. Switching providers keeps your Studio key and locks the Vertex session. Server sessions last up to 12 hours and are cleared when the app process exits. Google usage charges and quotas apply to the chosen provider.
+
+**Version 1.1:** All AI operations on both providers use **Gemini 3.8 Flash** with LOW thinking; there is no fallback to another model. Local food validation and deterministic nutrition arithmetic remain in place. Missing validation fields, non-food, unclear/low-confidence images, and empty detections cannot produce an accepted meal. Image decoding and validation run away from the UI thread, and the meal appears while insights load separately.
+
+**Version 1.2:** The visual refresh is now implemented in the native Android app: forest/ivory light and dark themes, serif headings, a larger meal photo, a unified nutrition panel, and a persistent Scan a meal action with refreshed navigation. See [native release and screenshots](docs/VISUAL_RELEASE_1_2.md). The separate HTML prototype was not included in version 1.1.
+
+**Version 1.3:** Removes the duplicate bottom scan/gallery strip and refines the meal view. A new **Profile** tab provides four skippable onboarding steps, editable age/height/weight/activity, goals, food preferences/allergies, and optional health notes. **Personalize answers defaults OFF.** Profile details are encrypted on this device and excluded from backups. When explicitly enabled, relevant details are sent to the selected Google AI provider for insights/chat; name stays local and photo recognition never uses the profile. Profile changes clear old advice/chat. See [profile behavior, privacy, and verification](docs/PROFILE_RELEASE_1_3.md).
+
+**Install on your phone:** Open `KalC-v1.3.apk` from your phone's Downloads or messaging/files app, allow **Install unknown apps / Allow from this source** if Android asks, then tap **Update / Install**. No USB cable, developer options, or USB debugging is needed. The signed, non-debug APK is built at `app/build/outputs/apk/release/app-release.apk`; an owner copy is in Windows `Downloads/KalC-v1.3.apk`. It updates over the signed v1.1/v1.2 release without uninstalling and retains connection settings. Onboarding appears once after this update and can be skipped. If an earlier debug build is installed, Android requires uninstalling that debug build first because the release certificate differs; this removes that build's saved settings.
+
+Owner setup, backend checks, deployment, passkey handling, and private release signing are documented in [server/README.md](server/README.md). See [verification and measured timings](docs/MIGRATION_VERIFICATION.md). The implemented visual direction is described in [docs/UI_OVERHAUL_PLAN.md](docs/UI_OVERHAUL_PLAN.md); the [HTML preview](docs/visual-overhaul-preview.html) is the earlier design reference.
+
 <p align="center">
   <img src="docs/images/app_logo.jpg" alt="KalC App Logo" width="100" style="border-radius: 20px;"/>
 </p>
@@ -187,7 +199,7 @@ Even when network connectivity is lost or an API rate limit is reached, KalC inc
 <details>
 <summary><b>Q3: What prevents the app from generating calories if I upload a selfie or a shoe?</b></summary>
 <br>
-<i>"We implemented a dual-tier Food Validation Gate. An on-device Haar/AdaBoost FaceDetector immediately catches human portraits locally in under 50ms, while the vision model evaluates an explicit food classification confidence score ($S_{food}$). If the image contains no recognizable food, the system aborts before calculating any calories."</i>
+<i>"We implemented a dual-tier Food Validation Gate. An on-device FaceDetector checks human portraits locally in a background worker, while the vision model evaluates an explicit food classification confidence score ($S_{food}$). If the image contains no recognizable food, or its food validation fields are missing or invalid, the system aborts before accepting a meal. Runtime varies by device; the local heuristic does not replace model validation."</i>
 </details>
 
 <details>

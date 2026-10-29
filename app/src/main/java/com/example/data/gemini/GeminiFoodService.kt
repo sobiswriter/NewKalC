@@ -4,6 +4,10 @@ import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
 import com.example.BuildConfig
+import com.example.data.auth.AiProvider
+import com.example.data.auth.VertexAccessRepository
+import com.example.data.auth.VertexAccessException
+import okhttp3.Response
 import com.example.data.model.AmbiguousFoodException
 import com.example.data.model.ChatMessage
 import com.example.data.model.DetectedFoodItem
@@ -12,6 +16,7 @@ import com.example.data.model.MealAnalysisResult
 import com.example.data.model.NonFoodException
 import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
+import com.example.data.profile.UserProfile
 import com.example.data.validation.FoodImageValidator
 import com.example.data.validation.ValidationOutcome
 import kotlinx.coroutines.Dispatchers
@@ -26,24 +31,50 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-class GeminiFoodService {
-
-    private val client = OkHttpClient.Builder()
+class GeminiFoodService(
+    private val vertexAccess: VertexAccessRepository? = null,
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(25, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(75, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+) {
+
+    private val usesVertex: Boolean get() = vertexAccess?.provider == AiProvider.VERTEX
+    private val modelsForProvider: List<String> get() = if (usesVertex) listOf("vertex") else candidateModels
+
+    private fun executeRequest(payload: JSONObject, model: String, apiKey: String): Response {
+        val vertex = model == "vertex"
+        if (!vertex) {
+            val settings = payload.optJSONObject("generationConfig") ?: JSONObject()
+            settings.put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW"))
+            settings.remove("temperature")
+            if (!settings.has("maxOutputTokens")) settings.put("maxOutputTokens", 4096)
+            payload.put("generationConfig", settings)
+        }
+        val request = if (vertex) {
+            vertexAccess!!.generationRequest(payload)
+        } else {
+            Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                .header("x-goog-api-key", apiKey)
+                .post(payload.toString().toRequestBody(jsonMediaType))
+                .build()
+        }
+        val response = client.newCall(request).execute()
+        if (vertex && response.code in listOf(401, 403)) {
+            response.close()
+            vertexAccess!!.lock()
+            throw VertexAccessException("Server access denied. Enter the passkey again in AI settings.")
+        }
+        return response
+    }
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    // Primary model is the latest Gemini 3.8 Flash, followed by modern active 3.x Flash fallback models
-    private val candidateModels = listOf(
-        "gemini-3.8-flash",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-flash-latest"
-    )
+    private val candidateModels = listOf("gemini-3.8-flash")
 
     /**
      * Converts Bitmap to Base64 JPEG string, resizing to optimal resolution for high-speed upload.
@@ -80,12 +111,15 @@ class GeminiFoodService {
             return@withContext Result.failure(IllegalArgumentException("API Key cannot be empty."))
         }
 
-        val testModels = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest")
+        val testModels = candidateModels
         var lastErrorMsg = "Failed to connect"
 
         for (modelName in testModels) {
             try {
                 val requestJson = JSONObject().apply {
+                    put("generationConfig", JSONObject()
+                        .put("maxOutputTokens", 64)
+                        .put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW")))
                     put("contents", JSONArray().apply {
                         put(JSONObject().apply {
                             put("parts", JSONArray().apply {
@@ -97,9 +131,10 @@ class GeminiFoodService {
                     })
                 }
 
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$cleanKey"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
                 val request = Request.Builder()
                     .url(url)
+                    .header("x-goog-api-key", cleanKey)
                     .post(requestJson.toString().toRequestBody(jsonMediaType))
                     .build()
 
@@ -156,7 +191,7 @@ class GeminiFoodService {
             ?: (try { System.getenv("GEMINI_API_KEY") } catch (_: Throwable) { null })?.trim() ?: "")
 
         // Check if API key is valid or missing
-        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+        val isRealKey = usesVertex || (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY")
 
         if (!isRealKey) {
             if (!sampleContextHint.isNullOrBlank()) {
@@ -261,28 +296,26 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 put("generationConfig", JSONObject().apply {
                     put("responseMimeType", "application/json")
                     put("temperature", 0.1)
-                    put("maxOutputTokens", 1024)
+                    put("maxOutputTokens", 4096)
                 })
             }
 
             var primaryModelError: String? = null
             var lastError: Exception? = null
 
-            for (modelName in candidateModels) {
+            for (modelName in modelsForProvider) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(requestJson.toString().toRequestBody(jsonMediaType))
-                        .build()
-
-                    val response = client.newCall(request).execute()
+                    val response = executeRequest(requestJson, modelName, apiKey)
                     val responseBody = response.body?.string()
 
                     if (response.isSuccessful && responseBody != null) {
                         Log.d("GeminiFoodService", "Successfully analyzed with model $modelName")
-                        val provisionalNames = extractFoodNames(responseBody)
+                        val parsedMeal = parseGeminiResponse(
+                            responseJsonString = responseBody,
+                            validationThreshold = validationThreshold,
+                            source = FoodDetectionSource.ORIGINAL_IMAGE
+                        )
+                        val provisionalNames = parsedMeal.foods.map { it.name }
                         if (provisionalNames.isNotEmpty()) {
                             onStageUpdate?.invoke(
                                 3,
@@ -290,11 +323,6 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                                 provisionalNames
                             )
                         }
-                        val parsedMeal = parseGeminiResponse(
-                            responseJsonString = responseBody,
-                            validationThreshold = validationThreshold,
-                            source = FoodDetectionSource.ORIGINAL_IMAGE
-                        )
                         return@withContext Result.success(parsedMeal)
                     } else {
                         val errMsg = try {
@@ -310,6 +338,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                         lastError = Exception(errMsg)
                     }
                 } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
                     Log.w("GeminiFoodService", "Exception with model $modelName: ${e.message}")
                     if (modelName == "gemini-3.8-flash") {
                         primaryModelError = e.message
@@ -343,6 +372,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 )
             }
         } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
             if (e is NonFoodException || e is AmbiguousFoodException) {
                 Result.failure(e)
             } else if (!sampleContextHint.isNullOrBlank()) {
@@ -351,7 +381,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             } else {
                 Log.e("GeminiFoodService", "Exception during user photo analysis: ${e.message}", e)
                 Result.failure(
-                    Exception("Image analysis error: ${e.message ?: "Failed to reach Gemini API"}. Please check your connection and API key.")
+                    Exception("Image analysis error: ${e.message ?: "Failed to reach Gemini API"}. Please check your connection and AI settings.")
                 )
             }
         }
@@ -379,7 +409,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             ?: BuildConfig.GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
             ?: BuildConfig.ENV_GEMINI_API_KEY.trim().takeIf { it.isNotEmpty() && it != "MY_GEMINI_API_KEY" }
             ?: (try { System.getenv("GEMINI_API_KEY") } catch (_: Throwable) { null })?.trim() ?: "")
-        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+        val isRealKey = usesVertex || (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY")
 
         if (!isRealKey) {
             return@withContext Result.failure(
@@ -450,15 +480,9 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             var primaryModelError: String? = null
             var lastError: Exception? = null
 
-            for (modelName in candidateModels) {
+            for (modelName in modelsForProvider) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(requestJson.toString().toRequestBody(jsonMediaType))
-                        .build()
-
-                    val response = client.newCall(request).execute()
+                    val response = executeRequest(requestJson, modelName, apiKey)
                     val responseBody = response.body?.string()
 
                     if (response.isSuccessful && responseBody != null) {
@@ -481,6 +505,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                         lastError = Exception(errMsg)
                     }
                 } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
                     if (modelName == "gemini-3.8-flash") {
                         primaryModelError = e.message
                     }
@@ -502,11 +527,12 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             Log.e("GeminiFoodService", "Side dish API call failed: $failureDetail")
             Result.failure(Exception("Failed to analyze additional food photo: $failureDetail"))
         } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
             if (e is NonFoodException || e is AmbiguousFoodException) {
                 Result.failure(e)
             } else {
                 Log.e("GeminiFoodService", "Exception in side dish analysis: ${e.message}", e)
-                Result.failure(Exception("Failed to analyze side dish: ${e.message ?: "Unknown error"}. Please check your connection and API key."))
+                Result.failure(Exception("Failed to analyze side dish: ${e.message ?: "Unknown error"}. Please check your connection and AI settings."))
             }
         }
     }
@@ -544,7 +570,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
      * Parses the JSON from Gemini, separating vision food identification from the Nutrition Database.
      * Enforces the Food Validation Gate to reject non-food and ambiguous images before nutrition calculation.
      */
-    private fun parseGeminiResponse(
+    internal fun parseGeminiResponse(
         responseJsonString: String,
         validationThreshold: Double = DEFAULT_FOOD_VALIDATION_THRESHOLD,
         source: FoodDetectionSource = FoodDetectionSource.ORIGINAL_IMAGE
@@ -565,8 +591,11 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         val parsedObj = JSONObject(cleanJson)
 
         // 1. FOOD VALIDATION GATE (Mandatory)
-        val isFood = parsedObj.optBoolean("is_food", true)
-        val foodConfidence = parsedObj.optDouble("food_confidence", 1.0)
+        val foodConfidence = parsedObj.optDouble("food_confidence", Double.NaN)
+        if (parsedObj.opt("is_food") !is Boolean || !foodConfidence.isFinite() || foodConfidence !in 0.0..1.0) {
+            throw AmbiguousFoodException("Couldn't confidently identify the food. Please upload a clearer image showing the food.")
+        }
+        val isFood = parsedObj.getBoolean("is_food")
         val rejectionReason = parsedObj.optString("rejection_reason", "")
 
         if (!isFood) {
@@ -834,12 +863,14 @@ Respond strictly with valid JSON without markdown fences matching this schema:
      */
     suspend fun generateNutritionInsights(
         meal: MealAnalysisResult,
-        providedApiKey: String? = null
+        providedApiKey: String? = null,
+        profile: UserProfile = UserProfile()
     ): Result<NutritionInsights> = withContext(Dispatchers.IO) {
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
-        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+        val isRealKey = usesVertex || (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY")
 
+        if (!isRealKey && profile.personalizationEnabled) return@withContext Result.failure(IllegalStateException("Connect an AI provider to get personalized guidance."))
         if (!isRealKey) {
             return@withContext Result.success(getDeterministicNutritionInsights(meal))
         }
@@ -851,7 +882,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
             }
 
             val prompt = """
-You are an expert clinical dietitian analyzing a user's final edited meal.
+You are a nutrition guide analyzing a user's final edited meal. Give general food guidance, not diagnoses or treatment plans.
+${profile.aiContext()}
 Meal items: $foodsSummary
 Total: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
 
@@ -884,15 +916,9 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                 })
             }
 
-            for (modelName in candidateModels) {
+            for (modelName in modelsForProvider) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(requestJson.toString().toRequestBody(jsonMediaType))
-                        .build()
-
-                    val response = client.newCall(request).execute()
+                    val response = executeRequest(requestJson, modelName, apiKey)
                     val responseBody = response.body?.string()
 
                     if (response.isSuccessful && responseBody != null) {
@@ -900,14 +926,16 @@ Respond strictly with valid JSON without markdown fences matching this schema:
                         return@withContext Result.success(parsed)
                     }
                 } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
                     Log.w("GeminiFoodService", "Insights call failed with $modelName: ${e.message}")
                 }
             }
 
-            Result.success(getDeterministicNutritionInsights(meal))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("Personalized insights are unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicNutritionInsights(meal))
         } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
             Log.e("GeminiFoodService", "Error generating insights: ${e.message}")
-            Result.success(getDeterministicNutritionInsights(meal))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("Personalized insights are unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicNutritionInsights(meal))
         }
     }
 
@@ -1018,11 +1046,12 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         bitmap: Bitmap?,
         providedApiKey: String? = null,
         userAddedFoods: List<String> = emptyList(),
-        userRemovedFoods: List<String> = emptyList()
+        userRemovedFoods: List<String> = emptyList(),
+        profile: UserProfile = UserProfile()
     ): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = (providedApiKey?.trim()?.takeIf { it.isNotEmpty() }
             ?: BuildConfig.GEMINI_API_KEY.trim())
-        val isRealKey = apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY"
+        val isRealKey = usesVertex || (apiKey.isNotEmpty() && apiKey != "MY_GEMINI_API_KEY")
 
         val total = meal.total
         val foodListDesc = meal.foods.joinToString("\n") {
@@ -1032,6 +1061,7 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         val addedDesc = if (userAddedFoods.isNotEmpty()) "User added foods: ${userAddedFoods.joinToString(", ")}" else "No user-added foods"
         val removedDesc = if (userRemovedFoods.isNotEmpty()) "User removed foods: ${userRemovedFoods.joinToString(", ")}" else "No foods removed"
 
+        if (!isRealKey && profile.personalizationEnabled) return@withContext Result.failure(IllegalStateException("Connect an AI provider to get personalized guidance."))
         if (!isRealKey) {
             return@withContext Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         }
@@ -1039,6 +1069,8 @@ Respond strictly with valid JSON without markdown fences matching this schema:
         try {
             val systemContext = """
 You are a friendly, evidence-based nutrition AI assisting a user with their current meal.
+Give general food guidance, not diagnoses or treatment plans.
+${profile.aiContext()}
 CURRENT MEAL (User Edited):
 $foodListDesc
 TOTALS: ${total.calories} kcal | Protein: ${total.protein}g | Carbs: ${total.carbs}g | Fat: ${total.fat}g
@@ -1062,15 +1094,9 @@ User Question: "$question"
                 })
             }
 
-            for (modelName in candidateModels) {
+            for (modelName in modelsForProvider) {
                 try {
-                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-                    val request = Request.Builder()
-                        .url(url)
-                        .post(requestJson.toString().toRequestBody(jsonMediaType))
-                        .build()
-
-                    val response = client.newCall(request).execute()
+                    val response = executeRequest(requestJson, modelName, apiKey)
                     val responseBody = response.body?.string()
 
                     if (response.isSuccessful && responseBody != null) {
@@ -1087,14 +1113,16 @@ User Question: "$question"
                         }
                     }
                 } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
                     Log.w("GeminiFoodService", "Ask AI failed with $modelName: ${e.message}")
                 }
             }
 
-            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("A personalized answer is unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         } catch (e: Exception) {
+                    if (e is VertexAccessException) return@withContext Result.failure(e)
             Log.e("GeminiFoodService", "Exception in askAboutFood: ${e.message}")
-            Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
+            if (profile.personalizationEnabled) Result.failure(IllegalStateException("A personalized answer is unavailable. Please check your AI connection and retry.")) else Result.success(getDeterministicAnswer(question, meal, userAddedFoods, userRemovedFoods))
         }
     }
 
