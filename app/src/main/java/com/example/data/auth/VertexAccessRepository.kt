@@ -18,7 +18,7 @@ enum class AiProvider { VERTEX, AI_STUDIO }
 
 data class AiConnectionState(val provider: AiProvider, val unlocked: Boolean = false, val expiresAt: Long = 0)
 
-class VertexAccessException(message: String) : Exception(message)
+class VertexAccessException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 class VertexAccessRepository(
     context: Context,
@@ -87,7 +87,7 @@ class VertexAccessRepository(
             Result.success(Unit)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            Result.failure(if (e is VertexAccessException) e else VertexAccessException("Could not unlock the server. Check your connection and retry."))
+            Result.failure(if (e is VertexAccessException) e else VertexAccessException("Could not unlock the server. Check your connection and retry.",e))
         }
     }
 

@@ -23,7 +23,9 @@ import com.example.data.model.NutritionInsights
 import com.example.data.nutrition.NutritionDatabase
 import com.example.data.profile.ProfileRepository
 import com.example.data.profile.UserProfile
+import com.example.data.kitchen.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -60,6 +64,8 @@ data class SampleFoodPreset(
 )
 
 data class FoodCalorieUiState(
+    val mainDestination: Int = 0,
+    val cookedPlateId: String? = null,
     val profile: UserProfile = UserProfile(),
     val isProfileLoading: Boolean = true,
     val showProfileOnboarding: Boolean = false,
@@ -129,6 +135,13 @@ class FoodCalorieViewModel(
         )
     )
     val uiState: StateFlow<FoodCalorieUiState> = _uiState.asStateFlow()
+    val kitchen = KitchenController(application, viewModelScope, geminiService,
+        { apiKeyRepository.getEffectiveApiKey() }, { _uiState.value.profile }, ::handleVertexAccessError)
+    private var historyScanId: String? = null
+    private var historyOriginal: MealAnalysisResult? = null
+    private var linkedCookedId: String? = null
+    private var scanRevision = 0L
+    private val historyWrites = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     val samplePresets = listOf(
         SampleFoodPreset(
@@ -152,6 +165,27 @@ class FoodCalorieViewModel(
     )
 
     init {
+        viewModelScope.launch {
+            uiState.map { Triple(it.activeMealResult,it.nutritionInsights,it.isPersonalizedInsights) }.distinctUntilChanged().collectLatest {
+                delay(250)
+                val meal=it.first ?: return@collectLatest
+                val id=historyScanId ?: return@collectLatest
+                val state=_uiState.value
+                try {
+                    withContext(Dispatchers.IO) {
+                        if(kitchen.history.enabled) {
+                            val old=kitchen.history.get(id)
+                            if(old==null && id in historyWrites) { historyScanId=null; return@withContext }
+                            kitchen.history.save(HistoryRecord(id=id,kind=HistoryKind.SCANNED,title=meal.foods.joinToString(" + ") { food -> food.name }.take(200),
+                                meal=meal,originalMeal=historyOriginal?:meal,insights=state.nutritionInsights,
+                                personalizedInsights=state.isPersonalizedInsights,linkedCookedId=linkedCookedId,
+                                createdAt=old?.createdAt?:meal.timestamp),if(old==null)state.currentImageBitmap else null)
+                            historyWrites.add(id)
+                        }
+                    }
+                } catch(e: Exception) { if(e is CancellationException)throw e; _uiState.update { s -> s.copy(feedbackBanner="Meal analyzed, but history could not be saved. Free storage and use Save current meal to retry.") } }
+            }
+        }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { profileRepository.load() }
             _uiState.update {
@@ -213,6 +247,7 @@ class FoodCalorieViewModel(
     fun selectAiProvider(provider: AiProvider) {
         if (provider == vertexAccess.provider) return
         vertexAccess.selectProvider(provider)
+        kitchen.invalidateProfile()
         _uiState.update { it.copy(aiProvider = provider, isVertexUnlocked = false, feedbackBanner = null) }
     }
 
@@ -308,6 +343,8 @@ class FoodCalorieViewModel(
     }
 
     fun selectSamplePreset(context: Context, preset: SampleFoodPreset) {
+        historyScanId=null;historyOriginal=null;linkedCookedId=null
+        _uiState.update {it.copy(cookedPlateId=null)}
         val bitmap = BitmapFactory.decodeResource(context.resources, preset.drawableResId)
         _uiState.update {
             it.copy(
@@ -321,10 +358,12 @@ class FoodCalorieViewModel(
     }
 
     fun onImageSelectedFromUri(context: Context, uri: Uri) {
+        linkedCookedId=null
+        _uiState.update {it.copy(cookedPlateId=null)}
         viewModelScope.launch {
             try {
                 val bitmap = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                    KitchenImages.decode(context,uri)
                 }
                 requireNotNull(bitmap) { "The selected file is not a readable image." }
                 _uiState.update {
@@ -353,10 +392,12 @@ class FoodCalorieViewModel(
         }
     }
 
-    fun onImageCapturedFromCamera(bitmap: Bitmap) {
+    fun onImageCapturedFromCamera(bitmap: Bitmap, cookedId: String? = null) {
+        linkedCookedId=cookedId
         _uiState.update {
             it.copy(
                 currentImageBitmap = bitmap,
+                cookedPlateId = cookedId,
                 currentImageResId = null,
                 currentImageTitle = "Camera Capture",
                 analysisState = AnalysisUiState.Analyzing(
@@ -371,6 +412,8 @@ class FoodCalorieViewModel(
     }
 
     fun analyzeImage(bitmap: Bitmap?, hint: String? = null) {
+        val attempt=++scanRevision
+        historyScanId=null
         viewModelScope.launch {
             if (bitmap == null) return@launch
 
@@ -468,9 +511,12 @@ class FoodCalorieViewModel(
             )
 
             result.onSuccess { mealResult ->
+                if(attempt!=scanRevision)return@onSuccess
+                if(hint.isNullOrBlank()) { historyScanId=java.util.UUID.randomUUID().toString(); historyOriginal=mealResult }
                 _uiState.update {
                     it.copy(
                         activeMealResult = mealResult,
+                        nutritionInsights = null,
                         originalFoodNames = mealResult.foods.map { food -> food.name },
                         analysisState = AnalysisUiState.Analyzing(
                             stepMessage = "Step 4/4: Generating AI Nutrition Insights...",
@@ -488,6 +534,7 @@ class FoodCalorieViewModel(
                     it.copy(analysisState = AnalysisUiState.Success(mealResult))
                 }
             }.onFailure { error ->
+                if(attempt!=scanRevision)return@onFailure
                 handleVertexAccessError(error)
                 when (error) {
                     is VertexAccessException -> {
@@ -655,6 +702,41 @@ class FoodCalorieViewModel(
     fun openProfile() { _uiState.update { it.copy(showProfile = true, profileError = null) } }
     fun closeProfile() { _uiState.update { it.copy(showProfile = false, activeNavTab = 0, profileError = null) } }
 
+    fun openKitchen() { kitchen.go("home"); _uiState.update { it.copy(mainDestination=1,showProfile=false) } }
+    fun openHistory() { kitchen.go("history"); _uiState.update { it.copy(mainDestination=1,showProfile=false) } }
+    fun openKalc() { _uiState.update { it.copy(mainDestination=0,showProfile=false) } }
+    fun scanCookedPlate(bitmap: Bitmap, cookedId: String?) {
+        linkedCookedId=cookedId
+        openKalc()
+        onImageCapturedFromCamera(bitmap,cookedId)
+    }
+    fun saveCurrentMeal(reviewCooking: Boolean = false) {
+        val state=_uiState.value; val meal=state.activeMealResult?:return
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { kitchen.history.save(HistoryRecord(id=historyScanId?:java.util.UUID.randomUUID().toString(),kind=HistoryKind.SCANNED,
+                title=meal.foods.joinToString(" + ") { it.name }.take(200),meal=meal,originalMeal=historyOriginal?:meal,
+                insights=state.nutritionInsights,personalizedInsights=state.isPersonalizedInsights,linkedCookedId=linkedCookedId),state.currentImageBitmap) } }
+                .onSuccess { record ->
+                    _uiState.update { it.copy(feedbackBanner="Meal saved locally in History.",mainDestination=if(reviewCooking)1 else it.mainDestination) }
+                    if(reviewCooking) kitchen.review(record)
+                }
+                .onFailure { _uiState.update { it.copy(feedbackBanner="History could not be saved. Free storage and retry.") } }
+        }
+    }
+    fun loadHistoryScan(record: HistoryRecord) {
+        val meal=record.meal?:return
+        scanRevision++; historyScanId=null; linkedCookedId=null
+        viewModelScope.launch {
+            val bitmap=withContext(Dispatchers.IO) { kitchen.history.photo(record)?.let { BitmapFactory.decodeFile(it.absolutePath) } }
+            historyScanId=record.id;historyOriginal=record.originalMeal?:meal;linkedCookedId=record.linkedCookedId
+            historyWrites.add(record.id)
+            _uiState.update { it.copy(mainDestination=0,activeMealResult=meal,analysisState=AnalysisUiState.Success(meal),currentImageBitmap=bitmap,currentImageResId=null,
+                originalFoodNames=meal.foods.map {food->food.name},cookedPlateId=record.linkedCookedId,
+                currentImageTitle=record.title,nutritionInsights=record.insights,isPersonalizedInsights=record.personalizedInsights,
+                chatMessages=emptyList(),feedbackBanner="Saved meal opened offline. Recalculate or ask AI only when you choose.") }
+        }
+    }
+
     fun saveProfile(profile: UserProfile, onDone: (Boolean) -> Unit = {}) = updateProfile(profile, delete = false, skip = false, onDone = onDone)
     fun setPersonalization(enabled: Boolean) = saveProfile(_uiState.value.profile.copy(personalizationEnabled = enabled))
     fun deleteProfile() = updateProfile(UserProfile(), delete = true, skip = false)
@@ -669,6 +751,7 @@ class FoodCalorieViewModel(
             }
             result.onSuccess {
                 profileRevision++
+                kitchen.invalidateProfile()
                 _uiState.update { state ->
                     state.copy(profile = profile, isSavingProfile = false, showProfileOnboarding = false,
                         nutritionInsights = state.activeMealResult?.let(geminiService::getDeterministicNutritionInsights),

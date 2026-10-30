@@ -82,6 +82,7 @@ class ProfileFlowTest {
             compose.onNodeWithTag("nav_ask_ai").performClick()
             compose.onNodeWithTag("ask_ai_input_field").performTextInput("Is this enough protein?")
             compose.onNodeWithTag("ask_ai_send_button").performClick()
+            compose.onNodeWithTag("meal_chat_messages").performScrollToNode(hasText("Is this enough protein?"))
             compose.onNodeWithText("Is this enough protein?").assertExists()
             compose.onNodeWithContentDescription("Close").performClick()
             compose.onNodeWithTag("nav_profile").performClick()

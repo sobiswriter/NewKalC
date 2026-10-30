@@ -35,23 +35,33 @@ class VisualFlowTest {
         keys.setStartupPromptDismissed(true)
         context.getSharedPreferences("kalc_ai_connection", 0).edit().putString("provider", "AI_STUDIO").commit()
         ActivityScenario.launch(MainActivity::class.java).use {
-            compose.onNodeWithText("KalC").assertIsDisplayed()
+            compose.onAllNodesWithText("KalC").onFirst().assertIsDisplayed()
             compose.onNodeWithText("SAMPLE MEAL").assertIsDisplayed()
             compose.onNodeWithTag("scan_meal_button").assertDoesNotExist()
             compose.onNodeWithTag("camera_button").assertIsDisplayed().assertHasClickAction()
             compose.onNodeWithTag("gallery_button").assertIsDisplayed().assertHasClickAction()
             capture("redesign-meal")
-            compose.onNodeWithTag("hero_adjust_button").performScrollTo().performClick()
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("adjust_meal_action_button"))
+            compose.onNodeWithTag("adjust_meal_action_button").performClick()
             val before = compose.onNodeWithText("Live Total:", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].first().text
             compose.onAllNodesWithContentDescription("Increase portion by 25g").onFirst().performClick()
             val after = compose.onNodeWithText("Live Total:", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].first().text
             assertNotEquals(before, after)
             capture("redesign-adjust")
             compose.onNodeWithTag("recalculate_button").performClick()
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("nav_insights"))
             compose.onNodeWithTag("nav_insights").performClick()
             compose.onNodeWithText("A little perspective").assertIsDisplayed()
             capture("redesign-insights")
-            compose.onNodeWithTag("nav_ask_ai").performClick()
+            // The recalculation snackbar temporarily overlays the content footer.
+            compose.waitUntil(10000) {
+                compose.onAllNodesWithText("Recalculated:", substring = true).fetchSemanticsNodes().isEmpty()
+            }
+            compose.onNodeWithTag("meal_content").performScrollToNode(hasTestTag("ask_ai_action_button"))
+            compose.onNodeWithTag("ask_ai_action_button").performClick()
+            try {
+                compose.waitUntil(10000) { runCatching { compose.onNodeWithTag("ask_ai_input_field").assertIsDisplayed() }.isSuccess }
+            } finally { capture("redesign-chat") }
             compose.onNodeWithTag("ask_ai_input_field").assertIsDisplayed()
             capture("redesign-chat")
             compose.onNodeWithContentDescription("Close").performClick()

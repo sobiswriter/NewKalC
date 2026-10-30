@@ -4,7 +4,7 @@
 
 > KalC tells you what is on your plate. Make a meal helps you decide what goes on it.
 
-This is a proposed next feature, not an implemented Android release. The app remains version 1.3. The illustrations are generated concepts; the interactive example uses seven original fictional recipes, a local sample pantry, scripted chat and preview timers. It uploads nothing and does not read the real profile.
+This is a proposed next feature, not an implemented Android release. This records the approved proposal; the subsequent native implementation and its verification are tracked in [the 1.4 release notes](../MAKE_A_MEAL_RELEASE_1_4.md). The illustrations are generated concepts; the interactive example uses seven original fictional recipes, a local sample pantry, scripted chat and preview timers. It uploads nothing and does not read the real profile.
 
 ## The experience in one line
 
@@ -212,7 +212,7 @@ Verified on 29 October 2026:
 
 These checks do not cover Android camera permissions, real AI output, persistent timers, real-device accessibility or recipe execution. Those remain acceptance work in the proposed build slices.
 
-**History amendment:** only the storyboard text and static planning panels have been extended. No local database, automatic save behavior, recipe persistence, finished-plate review, Android screen or APK has been implemented or runtime-tested for this addition.
+**History amendment (proposal stage):** this addition originally changed only storyboard text and static panels. Native persistence, finished-plate review, screens and release verification are now tracked separately in the [1.4 release notes](../MAKE_A_MEAL_RELEASE_1_4.md).
 
 ## Decisions to make together
 

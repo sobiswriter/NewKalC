@@ -180,6 +180,32 @@ fun FoodCalorieScreen(
         ProfileScreen(viewModel, uiState)
         return
     }
+    // Dialog: API Key & Validation Settings
+    if (uiState.showApiKeyDialog) {
+        ApiKeySettingsDialog(
+            provider = uiState.aiProvider,
+            isVertexUnlocked = uiState.isVertexUnlocked,
+            isUnlockingVertex = uiState.isUnlockingVertex,
+            onProviderChanged = { viewModel.selectAiProvider(it) },
+            onUnlockVertex = { passkey, onDone -> viewModel.unlockVertex(passkey, onDone) },
+            onLockVertex = { viewModel.lockVertex() },
+            currentMaskedKey = uiState.currentApiKeyMasked,
+            isConfigured = uiState.isApiKeyConfigured,
+            isTesting = uiState.isTestingApiKey,
+            isStartup = uiState.isStartupPrompt,
+            validationThreshold = uiState.validationThreshold,
+            onThresholdChanged = { viewModel.setValidationThreshold(it) },
+            onSaveKey = { key, onDone ->
+                viewModel.saveAndValidateApiKey(key, onDone)
+            },
+            onClearKey = { viewModel.clearApiKey() },
+            onDismiss = { viewModel.closeApiKeyDialog() }
+        )
+    }
+    if (uiState.mainDestination == 1) {
+        KitchenScreen(viewModel)
+        return
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -397,6 +423,7 @@ fun FoodCalorieScreen(
                             viewModel.openAskAiSheet()
                         }
                         3 -> viewModel.openProfile()
+                        4 -> viewModel.openKitchen()
                     }
                 }
             )
@@ -414,6 +441,7 @@ fun FoodCalorieScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
+                        .testTag("meal_content")
                         .padding(horizontal = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(24.dp),
                     contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
@@ -425,6 +453,16 @@ fun FoodCalorieScreen(
                         }
                     }
 
+                    item(key = "context_actions") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { coroutineScope.launch { listState.scrollToItem(3) } }, modifier=Modifier.testTag("nav_insights")) { Text("Insights") }
+                            TextButton(onClick = viewModel::openAskAiSheet, modifier=Modifier.testTag("nav_ask_ai")) { Text("Ask AI") }
+                            TextButton(onClick = viewModel::openHistory) { Text("History") }
+                        }
+                        if(uiState.cookedPlateId!=null) {
+                            Button(onClick={viewModel.saveCurrentMeal(reviewCooking=true)},modifier=Modifier.fillMaxWidth()) { Text("Save & review how I cooked it") }
+                        }
+                    }
                     // 1. Food Analysis Header (Hero Summary)
                     item(key = "header") {
                         CollapsibleMealHeader(
@@ -608,28 +646,7 @@ fun FoodCalorieScreen(
         )
     }
 
-    // Dialog: API Key & Validation Settings
-    if (uiState.showApiKeyDialog) {
-        ApiKeySettingsDialog(
-            provider = uiState.aiProvider,
-            isVertexUnlocked = uiState.isVertexUnlocked,
-            isUnlockingVertex = uiState.isUnlockingVertex,
-            onProviderChanged = { viewModel.selectAiProvider(it) },
-            onUnlockVertex = { passkey, onDone -> viewModel.unlockVertex(passkey, onDone) },
-            onLockVertex = { viewModel.lockVertex() },
-            currentMaskedKey = uiState.currentApiKeyMasked,
-            isConfigured = uiState.isApiKeyConfigured,
-            isTesting = uiState.isTestingApiKey,
-            isStartup = uiState.isStartupPrompt,
-            validationThreshold = uiState.validationThreshold,
-            onThresholdChanged = { viewModel.setValidationThreshold(it) },
-            onSaveKey = { key, onDone ->
-                viewModel.saveAndValidateApiKey(key, onDone)
-            },
-            onClearKey = { viewModel.clearApiKey() },
-            onDismiss = { viewModel.closeApiKeyDialog() }
-        )
-    }
+
 }
 
 // ==========================================
@@ -712,6 +729,8 @@ private fun MainFoodTopAppBar(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
                 ) {
+                    DropdownMenuItem(text = { Text("History") }, onClick = { showMenu=false; viewModel.openHistory() })
+                    DropdownMenuItem(text = { Text("Save current meal") }, onClick = { showMenu=false; viewModel.saveCurrentMeal() })
                     DropdownMenuItem(
                         text = { Text("Sample Food Dishes") },
                         leadingIcon = {
@@ -1457,28 +1476,18 @@ private fun SmartNavigationBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             NavigationTabItem(
-                title = "Meal",
+                title = "KalC",
                 icon = Icons.Default.Restaurant,
                 isSelected = activeTab == 0,
                 onClick = { onTabSelected(0) },
                 modifier = Modifier.weight(1f)
             )
             NavigationTabItem(
-                title = "Insights",
-                icon = Icons.Default.Lightbulb,
-                isSelected = activeTab == 1,
-                onClick = { onTabSelected(1) },
-                modifier = Modifier.weight(1f)
+                title = "Make a meal", icon = Icons.Default.Restaurant,
+                isSelected = activeTab == 4, onClick = { onTabSelected(4) }, modifier = Modifier.weight(1f)
             )
             NavigationTabItem(
-                title = "Ask AI",
-                icon = Icons.AutoMirrored.Filled.Chat,
-                isSelected = activeTab == 2,
-                onClick = { onTabSelected(2) },
-                modifier = Modifier.weight(1f)
-            )
-            NavigationTabItem(
-                title = "Profile", icon = Icons.Default.PersonOutline,
+                title = "You", icon = Icons.Default.PersonOutline,
                 isSelected = activeTab == 3, onClick = { onTabSelected(3) }, modifier = Modifier.weight(1f)
             )
         }
@@ -1506,7 +1515,7 @@ private fun NavigationTabItem(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         color = backgroundColor,
-        modifier = modifier.testTag("nav_${title.lowercase().replace(' ', '_')}")
+        modifier = modifier.testTag(when(title) { "You" -> "nav_profile"; "KalC" -> "nav_meal"; else -> "nav_${title.lowercase().replace(' ', '_')}" })
             .semantics { selected = isSelected; role = Role.Tab }
     ) {
         Column(
@@ -2293,6 +2302,8 @@ private fun AskAiBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val chatListState = rememberLazyListState()
     val total = meal?.total
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val compact = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 480
 
     // Auto-scroll to latest message when messages change or while asking
     LaunchedEffect(chatMessages.size, isAsking) {
@@ -2349,7 +2360,7 @@ private fun AskAiBottomSheet(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    if (total != null) {
+                    if (total != null && !compact) {
                         Text(
                             text = "Context: ${total.calories} kcal · ${total.protein}P · ${total.carbs}C · ${total.fat}F",
                             style = MaterialTheme.typography.bodySmall,
@@ -2364,6 +2375,7 @@ private fun AskAiBottomSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            if (!compact) {
             // Horizontal Prompt Suggestions
             Row(
                 modifier = Modifier
@@ -2393,10 +2405,11 @@ private fun AskAiBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            }
             // Chat Message List
             LazyColumn(
                 state = chatListState,
-                modifier = Modifier
+                modifier = Modifier.testTag("meal_chat_messages")
                     .weight(1f)
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -2471,6 +2484,7 @@ private fun AskAiBottomSheet(
                         keyboardActions = KeyboardActions(
                             onSend = {
                                 if (questionInput.isNotBlank() && !isAsking) {
+                                    keyboard?.hide()
                                     onSendQuestion(questionInput)
                                 }
                             }
@@ -2478,7 +2492,8 @@ private fun AskAiBottomSheet(
                     )
 
                     FilledIconButton(
-                        onClick = { onSendQuestion(questionInput) },
+                        onClick = { keyboard?.hide()
+                                    onSendQuestion(questionInput) },
                         enabled = questionInput.isNotBlank() && !isAsking,
                         colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -2852,7 +2867,7 @@ private fun ApiKeySettingsDialog(
 // ==========================================
 
 @Composable
-private fun FullScreenImageViewerDialog(
+internal fun FullScreenImageViewerDialog(
     bitmap: Bitmap?,
     resId: Int?,
     title: String,

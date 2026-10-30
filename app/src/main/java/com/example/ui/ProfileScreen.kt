@@ -55,6 +55,7 @@ internal fun ProfileScreen(viewModel: FoodCalorieViewModel, state: FoodCalorieUi
             }
             Text(if (state.profile.name.isBlank()) "A little more you." else "Hello, ${state.profile.name}.", style = MaterialTheme.typography.displaySmall)
             Text("Better context. More thoughtful suggestions. Always your choice.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick=viewModel::openHistory, modifier=Modifier.fillMaxWidth()) { Text("Your history & saved recipes") }
             PersonalizationChoice(state.profile.personalizationEnabled, !state.isSavingProfile, viewModel::setPersonalization)
             state.profileError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.isSavingProfile) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -205,7 +206,7 @@ private fun ProfileWizard(initial: UserProfile, onboarding: Boolean, busy: Boole
                             PersonalizationChoice(enabled, !busy) { enabled = it }
                             val preview = runCatching { draft() }.getOrNull()
                             preview?.let { ProfileDetails(it) }
-                            Text("You can edit, turn off, or delete your profile in the Profile tab anytime. Skipping discards this draft.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("You can edit, turn off, or delete your profile in the You section anytime. Skipping discards this draft.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
