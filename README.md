@@ -10,7 +10,7 @@ KalC combines photo-based meal estimates with a personal cookbook. Scan a meal f
 
 **Current version: 1.4.2** · Android 7.0+ · [Latest release notes](docs/COOKBOOK_1_4_2.md)
 
-[Install](#install-on-your-phone) · [Features](#explore-the-app) · [AI setup](#choose-your-ai-connection) · [Build](#build-and-run) · [Verification](#quality-and-verification) · [Documentation](#documentation)
+[Install](#install-on-your-phone) · [Features](#explore-the-app) · [AI setup](#choose-your-ai-connection) · [Deep learning](#deep-learning-and-project-architecture) · [Viva guide](docs/VIVA_AND_PRESENTATION.md) · [Build](#build-and-run) · [Verification](#quality-and-verification) · [Documentation](#documentation)
 
 ## A look inside
 
@@ -87,6 +87,89 @@ Nutrition arithmetic uses grams and per-100g references. Known foods resolve aga
 
 Recipe nutrition is withheld when ingredient coverage or usable weights are incomplete. Scanning the actual finished plate provides a separate estimate. Photos cannot establish taste, internal temperature or safe doneness, and generated recipes have not been kitchen-tested.
 
+## Deep learning and project architecture
+
+KalC is an **applied deep learning project** using a pretrained multimodal Gemini model through Google APIs. The repository does not train or fine-tune a neural network. Its contribution is an end-to-end Android system that combines model inference with validation, deterministic nutrition arithmetic, recipe constraints, consent and local persistence.
+
+### The concepts, in plain language
+
+| Concept | Explanation | Role in KalC |
+| --- | --- | --- |
+| **Deep learning** | Neural networks learn useful representations from training examples. | Google's pretrained model provides the learned image/language capabilities; KalC calls it during inference. |
+| **Multimodal inference** | A model processes different input types together, such as an image and instructions. | Food/ingredient photos and task prompts produce structured meal or recipe information. |
+| **Attention** | A mechanism weights relationships between representations so context can influence a prediction. | Useful background for understanding modern models; KalC does not inspect Google's internal attention maps or implement its own transformer. |
+| **Prompt engineering** | Instructions specify the task, required fields and rejection behavior. | Meal prompts request food status, confidence, item names, estimated grams and nutrition references. Kitchen prompts request ingredients, recipes and methods. |
+| **Structured prediction** | Model output is organized into fields that code can validate. | JSON responses are parsed and checked before becoming accepted app state. Valid JSON alone does not prove the contents are true. |
+| **Hybrid AI system** | Learned inference is combined with explicit rules and calculations. | AI interprets the photo; application code checks responses, calculates macros and checks recipe readiness. |
+
+Google documents Gemini's [image understanding](https://ai.google.dev/gemini-api/docs/image-understanding) and [structured outputs](https://ai.google.dev/gemini-api/docs/structured-output). The original [Attention Is All You Need paper](https://arxiv.org/abs/1706.03762) explains transformer attention. These references explain the underlying ideas; they do not establish an exact unpublished Gemini architecture, training dataset or accuracy score for KalC.
+
+### End-to-end architecture
+
+```mermaid
+flowchart TD
+    A[Native Android app: photo or text] --> B[Image preparation and local checks]
+    B --> C{Selected AI provider}
+    C -->|Own API key| D[Google AI Studio]
+    C -->|Passkey session| E[KalC backend on Cloud Run]
+    E --> F[Vertex AI]
+    D --> G[Structured model response]
+    F --> G
+    G --> H[Parsing and application validation]
+    H --> I[Meal: nutrition references and portion arithmetic]
+    H --> J[Kitchen: ingredient and equipment matching]
+    I --> K[Compose screens and optional AI advice]
+    J --> L[Cookbook and confirmed cooking steps]
+    K --> M[Private local history]
+    L --> M
+```
+
+The meal and kitchen paths share the selected AI connection. Profile context is attached only to permitted purposes after consent. Saved-history browsing and local calculations do not require a new AI request.
+
+### Food recognition and portion estimation
+
+The model receives a photo plus instructions to identify edible items and estimate their portions. These are semantic item detections, not a custom-trained bounding-box or segmentation model. Visible containers, food appearance and package information can inform estimated grams; KalC does not reconstruct a measured 3D scene or use a depth sensor. Hidden oil, overlapping foods and unfamiliar dishes remain sources of error.
+
+The local `FoodImageValidator` uses face and low-variation image heuristics. These are preliminary checks, not a trained food classifier. The cloud response must also pass the food-validation gate: a Boolean food flag, finite confidence in range, sufficient confidence and nonempty food detections. The default confidence threshold is **0.65**. A model-reported confidence of 0.85 is not evidence of 85% measured accuracy or a calibrated probability.
+
+### Nutrition calculation example
+
+For each item, multiply its weight by the per-100g reference, then sum the items:
+
+```text
+item calories = weight in grams / 100 × calories per 100g
+item protein  = weight in grams / 100 × protein per 100g
+meal totals   = sum of the individual item values
+```
+
+Using the local steamed basmati rice reference:
+
+| Quantity | Reference per 100g | Result for 180g |
+| --- | --- | --- |
+| Energy | 130 kcal | 234 kcal |
+| Protein | 2.7 g | 4.86 g |
+| Carbohydrate | 28.2 g | 50.76 g |
+| Fat | 0.3 g | 0.54 g |
+
+If the portion is corrected to 200g, the same reference gives 260 kcal. The app recalculates from the edited weight. Display rounding may differ from the unrounded arithmetic above. The local catalogue contains reference entries with source labels; it is not a live USDA query or an independently audited laboratory database. Unmatched foods can use model-supplied references, so those values retain model uncertainty.
+
+### What makes the cooking section technical?
+
+The model proposes recipes; local matching checks quantities, units, raw/cooked state, equipment and avoidances against the confirmed pantry. This combines generative suggestions with explicit constraints. A preparation checklist resolves missing requirements before cooking begins. Cooking progress, recipe snapshots and confirmed meals are saved locally. Optional finished-plate analysis links cooking back to the meal scanner, but cannot verify taste or internal doneness.
+
+### Implementation map for your explanation
+
+| Responsibility | Source to show during a viva |
+| --- | --- |
+| Meal prompts, provider transport and response validation | [GeminiFoodService.kt](app/src/main/java/com/example/data/gemini/GeminiFoodService.kt) |
+| On-device image heuristics | [FoodImageValidator.kt](app/src/main/java/com/example/data/validation/FoodImageValidator.kt) |
+| Nutrition reference lookup and arithmetic | [NutritionDatabase.kt](app/src/main/java/com/example/data/nutrition/NutritionDatabase.kt), [FoodModels.kt](app/src/main/java/com/example/data/model/FoodModels.kt) |
+| Recipe AI and local matching | [KitchenAiService.kt](app/src/main/java/com/example/data/kitchen/KitchenAiService.kt), [KitchenModels.kt](app/src/main/java/com/example/data/kitchen/KitchenModels.kt) |
+| Cooking state and history | [KitchenController.kt](app/src/main/java/com/example/ui/KitchenController.kt), [HistoryRepository.kt](app/src/main/java/com/example/data/kitchen/HistoryRepository.kt) |
+| Passkey-protected Vertex proxy | [server/index.mjs](server/index.mjs) |
+
+For a **presentation sequence, demo checklist, examiner questions and an evaluation plan**, use the [viva and presentation guide](docs/VIVA_AND_PRESENTATION.md).
+
 ## Build and run
 
 ### Requirements
@@ -156,6 +239,7 @@ These checks used an API 36 emulator. Physical **Realme 8 5G / Android 13**, rea
 
 | Guide | Contents |
 | --- | --- |
+| [Viva & presentation](docs/VIVA_AND_PRESENTATION.md) | Technical explanation, speaking outline, demo and examiner questions. |
 | [Cookbook & responsive layouts — 1.4.2](docs/COOKBOOK_1_4_2.md) | Latest design changes, screen matrix and verification limits. |
 | [Cooking & image fixes — 1.4.1](docs/QA_1_4_1.md) | Preparation flow, aspect-ratio fixes and regression checks. |
 | [Make a meal & history — 1.4](docs/MAKE_A_MEAL_RELEASE_1_4.md) | Kitchen features, persistence, privacy, timers and release verification. |
